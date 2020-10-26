@@ -17,6 +17,8 @@ from data import get_musdb_folds, SeparationDataset, random_amplify, crop
 from test import evaluate, validate
 from waveunet import Waveunet
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
 
