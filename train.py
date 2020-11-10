@@ -20,7 +20,7 @@ import utils
 # from data import get_musdb_folds, SeparationDataset, random_amplify, crop
 from data import get_dali_folds, LyricsAlignDataset
 # from test import evaluate, validate
-from waveunet import Waveunet
+from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
 
@@ -31,7 +31,7 @@ def main(args):
     num_features = [args.features*i for i in range(1, args.levels+1)] if args.feature_growth == "add" else \
                    [args.features*2**i for i in range(0, args.levels)]
     target_outputs = int(args.output_size * args.sr)
-    model = Waveunet(args.channels, num_features, args.channels, args.instruments, kernel_size=args.kernel_size,
+    model = WaveunetLyrics(args.channels, num_features, args.channels, args.instruments, kernel_size=args.kernel_size,
                      target_output_size=target_outputs, depth=args.depth, strides=args.strides,
                      conv_type=args.conv_type, res=args.res, separate=args.separate)
 
