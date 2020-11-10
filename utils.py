@@ -167,3 +167,9 @@ def load_latest_model_from(model, optimizer, location, cuda):
     newest_file = max(files, key=os.path.getctime)
     print("load model " + newest_file)
     return load_model(model, optimizer, newest_file, cuda)
+
+def seed_torch(seed=0):
+    # random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)

@@ -1,121 +1,82 @@
 import h5py
-import musdb
+
 import os
 import numpy as np
 from sortedcontainers import SortedList
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 import glob
 
 from tqdm import tqdm
-
+import DALI as dali_code
 from utils import load, write_wav
 
-def getMUSDBHQ(database_path):
-    subsets = list()
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
-    for subset in ["train", "test"]:
-        print("Loading " + subset + " set...")
-        tracks = glob.glob(os.path.join(database_path, subset, "*"))
-        samples = list()
+def getDALI(database_path, level, lang, genre):
+    dali_annot_path = os.path.join(database_path, 'annot_tismir')
+    dali_audio_path = os.path.join(database_path, 'audio')
+    dali_data = dali_code.get_the_DALI_dataset(dali_annot_path, skip=[], keep=[])
 
-        # Go through tracks
-        for track_folder in sorted(tracks):
-            # Skip track if mixture is already written, assuming this track is done already
-            example = dict()
-            for stem in ["mix", "bass", "drums", "other", "vocals"]:
-                filename = stem if stem != "mix" else "mixture"
-                audio_path = os.path.join(track_folder, filename + ".wav")
-                example[stem] = audio_path
+    # get audio list
+    audio_list = os.listdir(os.path.join(dali_audio_path))[:100]
 
-            # Add other instruments to form accompaniment
-            acc_path = os.path.join(track_folder, "accompaniment.wav")
+    subset = list()
+    duration = list()
+    total_line_num = 0
+    discard_line_num = 0
 
-            if not os.path.exists(acc_path):
-                print("Writing accompaniment to " + track_folder)
-                stem_audio = []
-                for stem in ["bass", "drums", "other"]:
-                    audio, sr = load(example[stem], sr=None, mono=False)
-                    stem_audio.append(audio)
-                acc_audio = np.clip(sum(stem_audio), -1.0, 1.0)
-                write_wav(acc_path, acc_audio, sr)
+    for file in audio_list:
+        if file.endswith('.mp3') and os.path.exists(os.path.join(dali_annot_path, file[:-4] + '.gz')):
+            # get annotation for the current song
+            try:
+                entry = dali_data[file[:-4]]
+                entry_info = entry.info
 
-            example["accompaniment"] = acc_path
+                # language filter
+                if lang is not None and entry_info['metadata']['language'] != lang:
+                    continue
+                # genre filter
+                if genre is not None and genre not in entry_info['metadata']['genres']:
+                    continue
 
-            samples.append(example)
+                song = {"id": file[:-4], "annot": [], "path": os.path.join(dali_audio_path, file)}
+                samples = entry.annotations['annot'][level]
+                subset.append(song)
 
-        subsets.append(samples)
+                for sample in samples:
+                    sample["duration"] = sample["time"][1] - sample["time"][0]
 
-    return subsets
+                    if sample["duration"] > 10.22:
+                        print(sample)
+                        discard_line_num += 1
 
-def getMUSDB(database_path):
-    mus = musdb.DB(root=database_path, is_wav=False)
+                    song["annot"].append(sample)
+                    duration.append(sample["duration"])
 
-    subsets = list()
+                    total_line_num += 1
 
-    for subset in ["train", "test"]:
-        tracks = mus.load_mus_tracks(subset)
-        samples = list()
+                logging.debug("Successfully loaded {} songs".format(len(subset)))
+            except:
+                logging.warning("Error loading annotation for song {}".format(file))
+                pass
 
-        # Go through tracks
-        for track in sorted(tracks):
-            # Skip track if mixture is already written, assuming this track is done already
-            track_path = track.path[:-4]
-            mix_path = track_path + "_mix.wav"
-            acc_path = track_path + "_accompaniment.wav"
-            if os.path.exists(mix_path):
-                print("WARNING: Skipping track " + mix_path + " since it exists already")
+    logging.debug("Scanning {} songs.".format(len(subset)))
+    logging.debug("Total line num: {} Discarded line num: {}".format(total_line_num,  discard_line_num))
 
-                # Add paths and then skip
-                paths = {"mix" : mix_path, "accompaniment" : acc_path}
-                paths.update({key : track_path + "_" + key + ".wav" for key in ["bass", "drums", "other", "vocals"]})
+    return np.array(subset, dtype=object)
 
-                samples.append(paths)
+def get_dali_folds(database_path, level, lang="english", genre=None):
+    dataset = getDALI(database_path, level, lang, genre)
 
-                continue
+    total_len = len(dataset)
+    train_len = np.int(0.8 * total_len)
 
-            rate = track.rate
-
-            # Go through each instrument
-            paths = dict()
-            stem_audio = dict()
-            for stem in ["bass", "drums", "other", "vocals"]:
-                path = track_path + "_" + stem + ".wav"
-                audio = track.targets[stem].audio
-                write_wav(path, audio, rate)
-                stem_audio[stem] = audio
-                paths[stem] = path
-
-            # Add other instruments to form accompaniment
-            acc_audio = np.clip(sum([stem_audio[key] for key in list(stem_audio.keys()) if key != "vocals"]), -1.0, 1.0)
-            write_wav(acc_path, acc_audio, rate)
-            paths["accompaniment"] = acc_path
-
-            # Create mixture
-            mix_audio = track.audio
-            write_wav(mix_path, mix_audio, rate)
-            paths["mix"] = mix_path
-
-            diff_signal = np.abs(mix_audio - acc_audio - stem_audio["vocals"])
-            print("Maximum absolute deviation from source additivity constraint: " + str(np.max(diff_signal)))# Check if acc+vocals=mix
-            print("Mean absolute deviation from source additivity constraint:    " + str(np.mean(diff_signal)))
-
-            samples.append(paths)
-
-        subsets.append(samples)
-
-    print("DONE preparing dataset!")
-    return subsets
-
-def get_musdb_folds(root_path):
-    dataset = getMUSDBHQ(root_path)
-    train_val_list = dataset[0]
-    test_list = dataset[1]
-
-    np.random.seed(1337)
-    train_list = np.random.choice(train_val_list, 75, replace=False)
-    val_list = [elem for elem in train_val_list if elem not in train_list]
-    print("First training song: " + str(train_list[0]))
-    return {"train" : train_list, "val" : val_list, "test" : test_list}
+    train_list = np.random.choice(dataset, train_len, replace=False)
+    val_list = [elem for elem in dataset if elem not in train_list]
+    logging.debug("First training song: " + str(train_list[0]["id"]) + " " + str(len(train_list[0]["annot"])) + " lines")
+    logging.debug("train_list {} songs val_list {} songs".format(len(train_list), len(val_list)))
+    return {"train" : train_list, "val" : val_list}
 
 def crop(mix, targets, shapes):
     '''
@@ -147,6 +108,157 @@ def random_amplify(mix, targets, shapes, min, max):
             mix += targets[key]  # add instrument with gain data augmentation to mix
     mix = np.clip(mix, -1.0, 1.0)
     return crop(mix, targets, shapes)
+
+class LyricsAlignDataset(IterableDataset):
+    def __init__(self, dataset, partition, sr, shapes, hdf_dir, in_memory=False, dummy=False):
+        '''
+
+        :param dataset:     a list of song with line level annotation
+        :param sr:          sampling rate
+        :param shapes:      dict, keys: "output_frames", "output_start_frame", "input_frames"
+        :param hdf_dir:     hdf5 file
+        :param in_memory:   load in memory or not
+        :param dummy:       use a subset
+        '''
+
+        super(LyricsAlignDataset, self).__init__()
+
+        self.hdf_dataset = None
+        os.makedirs(hdf_dir, exist_ok=True)
+        if dummy == False:
+            self.hdf_file = os.path.join(hdf_dir, partition + ".hdf5")
+        else:
+            self.hdf_file = os.path.join(hdf_dir, partition + "_dummy.hdf5")
+
+        self.sr = sr
+        self.shapes = shapes
+        self.hop = (shapes["output_frames"] // 2)
+        self.in_memory = in_memory
+
+        # PREPARE HDF FILE
+
+        # Check if HDF file exists already
+        if not os.path.exists(self.hdf_file):
+            # Create folder if it did not exist before
+            if not os.path.exists(hdf_dir):
+                os.makedirs(hdf_dir)
+
+            # Create HDF file
+            with h5py.File(self.hdf_file, "w") as f:
+                f.attrs["sr"] = sr
+
+                print("Adding audio files to dataset (preprocessing)...")
+                for idx, example in enumerate(tqdm(dataset[partition])):
+                    # Load song
+                    y, _ = load(example["path"], sr=self.sr, mono=True)
+
+                    # Add to HDF5 file
+                    grp = f.create_group(str(idx))
+                    grp.create_dataset("inputs", shape=y.shape, dtype=y.dtype, data=y)
+
+                    grp.attrs["input_length"] = y.shape[1]
+
+                    annot_num = len(example["annot"])
+                    lyrics = [sample["text"].encode() for sample in example["annot"]]
+                    times = np.array([sample["time"] for sample in example["annot"]])
+
+                    grp.attrs["annot_num"] = annot_num
+
+                    grp.create_dataset("lyrics", shape=(annot_num, 1), dtype='S100', data=lyrics)
+                    grp.create_dataset("times", shape=(annot_num, 2), dtype=times.dtype, data=times)
+
+        # In that case, check whether sr and channels are complying with the audio in the HDF file, otherwise raise error
+        with h5py.File(self.hdf_file, "r") as f:
+            if f.attrs["sr"] != sr:
+                raise ValueError(
+                    "Tried to load existing HDF file, but sampling rate is not as expected. Did you load an out-dated HDF file?")
+
+        # HDF FILE READY
+
+        # SET SAMPLING POSITIONS
+
+        # Go through HDF and collect lengths of all audio files
+        with h5py.File(self.hdf_file, "r") as f:
+            # length of song
+            lengths = [f[str(song_idx)].attrs["input_length"] for song_idx in range(len(f))]
+
+            # Subtract input_size from lengths and divide by hop size to determine number of starting positions
+            lengths = [( (l - self.shapes["output_frames"]) // self.hop) + 1 for l in lengths]
+
+        self.start_pos = SortedList(np.cumsum(lengths))
+        self.length = self.start_pos[-1]
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+
+        # Open HDF5
+        if self.hdf_dataset is None:
+            driver = "core" if self.in_memory else None  # Load HDF5 fully into memory if desired
+            self.hdf_dataset = h5py.File(self.hdf_dir, 'r', driver=driver)
+
+        while True:
+
+            index = np.random.randint(self.length)
+
+            # Find out which slice of targets we want to read
+            song_idx = self.start_pos.bisect_right(index)
+            if song_idx > 0:
+                index = index - self.start_pos[song_idx - 1]
+
+            # Check length of audio signal
+            audio_length = self.hdf_dataset[str(song_idx)].attrs["input_length"]
+            annot_num = self.hdf_dataset[str(song_idx)].attrs["annot_num"]
+            target_length = self.shapes["output_frames"]
+
+            # Determine position where to start targets
+            start_target_pos = index * self.hop
+            end_target_pos = start_target_pos + self.shapes["output_frames"]
+
+            # READ INPUTS
+            # Check front padding
+            start_pos = start_target_pos - self.shapes["output_start_frame"]
+            if start_pos < 0:
+                # Pad manually since audio signal was too short
+                pad_front = abs(start_pos)
+                start_pos = 0
+            else:
+                pad_front = 0
+
+            # Check back padding
+            end_pos = start_target_pos - self.shapes["output_start_frame"] + self.shapes["input_frames"]
+            if end_pos > audio_length:
+                # Pad manually since audio signal was too short
+                pad_back = end_pos - audio_length
+                end_pos = audio_length
+            else:
+                pad_back = 0
+
+            # read audio and zero padding
+            audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
+            if pad_front > 0 or pad_back > 0:
+                audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
+
+            # find the lyrics within (start_target_pos, end_target_pos)
+            words_start_end_pos = self.hdf_dataset[str(song_idx)]["times"][:]
+            first_word_to_include = next(x for x, val in enumerate(list(words_start_end_pos[:, 0]))
+                                         if val > start_target_pos)
+            last_word_to_include = annot_num - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
+                                         if val < end_target_pos)
+
+            targets = " "
+            if first_word_to_include - 1 == last_word_to_include + 1: # the word covers the whole window
+                targets = None
+                continue
+            if first_word_to_include <= last_word_to_include: # the window covers word[first:last+1]
+                targets = " ".join(list(self.hdf_dataset[str(song_idx)]["lyrics"]
+                              [first_word_to_include:last_word_to_include+1]))
+
+            return audio, targets
+
+    def __len__(self):
+        return self.length
 
 class SeparationDataset(Dataset):
     def __init__(self, dataset, partition, instruments, sr, channels, shapes, random_hops, hdf_dir, audio_transform=None, in_memory=False):

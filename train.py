@@ -1,5 +1,9 @@
 import argparse
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["PATH"] = os.environ["PATH"] + ":import/linux/ffmpeg/4.2.2/bin/ffmpeg"
+
 import time
 from functools import partial
 
@@ -13,11 +17,12 @@ from torch.optim import Adam
 from tqdm import tqdm
 
 import utils
-from data import get_musdb_folds, SeparationDataset, random_amplify, crop
-from test import evaluate, validate
+# from data import get_musdb_folds, SeparationDataset, random_amplify, crop
+from data import get_dali_folds, LyricsAlignDataset
+# from test import evaluate, validate
 from waveunet import Waveunet
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+utils.seed_torch(2742)
 
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
@@ -31,26 +36,33 @@ def main(args):
                      conv_type=args.conv_type, res=args.res, separate=args.separate)
 
     if args.cuda:
-        model = utils.DataParallel(model)
+        # model = utils.DataParallel(model)
         print("move model to gpu")
         model.cuda()
 
-    print('model: ', model)
+    # print('model: ', model)
     print('parameter count: ', str(sum(p.numel() for p in model.parameters())))
 
     writer = SummaryWriter(args.log_dir)
 
     ### DATASET
-    musdb = get_musdb_folds(args.dataset_dir)
-    # If not data augmentation, at least crop targets to fit model output shape
-    crop_func = partial(crop, shapes=model.shapes)
-    # Data augmentation function for training
-    augment_func = partial(random_amplify, shapes=model.shapes, min=0.7, max=1.0)
-    train_data = SeparationDataset(musdb, "train", args.instruments, args.sr, args.channels, model.shapes, True, args.hdf_dir, audio_transform=augment_func)
-    val_data = SeparationDataset(musdb, "val", args.instruments, args.sr, args.channels, model.shapes, False, args.hdf_dir, audio_transform=crop_func)
-    test_data = SeparationDataset(musdb, "test", args.instruments, args.sr, args.channels, model.shapes, False, args.hdf_dir, audio_transform=crop_func)
+    # dali_split = get_dali_folds(args.dataset_dir, level="words")
+    dali_split = {"train": [], "val": []} # h5 files already saved
 
-    dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, worker_init_fn=utils.worker_init_fn)
+    # If not data augmentation, at least crop targets to fit model output shape
+    # crop_func = partial(crop, shapes=model.shapes)
+    # Data augmentation function for training
+    # augment_func = partial(random_amplify, shapes=model.shapes, min=0.7, max=1.0)
+    # train_data = SeparationDataset(musdb, "train", args.instruments, args.sr, args.channels, model.shapes, True, args.hdf_dir, audio_transform=augment_func)
+    # val_data = SeparationDataset(musdb, "val", args.instruments, args.sr, args.channels, model.shapes, False, args.hdf_dir, audio_transform=crop_func)
+    # test_data = SeparationDataset(musdb, "test", args.instruments, args.sr, args.channels, model.shapes, False, args.hdf_dir, audio_transform=crop_func)
+
+    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, dummy=True)
+    val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, dummy=True)
+
+    dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, worker_init_fn=utils.worker_init_fn)
+
+    exit()
 
     ##### TRAINING ####
 
@@ -181,7 +193,7 @@ if __name__ == '__main__':
                         help='Number of feature channels per layer')
     parser.add_argument('--log_dir', type=str, default='logs/waveunet',
                         help='Folder to write logs into')
-    parser.add_argument('--dataset_dir', type=str, default="/mnt/windaten/Datasets/MUSDB18HQ",
+    parser.add_argument('--dataset_dir', type=str, default="/import/c4dm-datasets/DALI_v2.0/",
                         help='Dataset path')
     parser.add_argument('--hdf_dir', type=str, default="hdf",
                         help='Dataset path')
@@ -201,7 +213,7 @@ if __name__ == '__main__':
                         help="Number of DS/US blocks")
     parser.add_argument('--depth', type=int, default=1,
                         help="Number of convs per block")
-    parser.add_argument('--sr', type=int, default=44100,
+    parser.add_argument('--sr', type=int, default=22050,
                         help="Sampling rate")
     parser.add_argument('--channels', type=int, default=2,
                         help="Number of input audio channels")
