@@ -2,7 +2,6 @@ import argparse
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-os.environ["PATH"] = os.environ["PATH"] + ":import/linux/ffmpeg/4.2.2/bin/ffmpeg"
 
 import time
 from functools import partial
@@ -28,12 +27,13 @@ def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
 
     # MODEL
-    num_features = [args.features*i for i in range(1, args.levels+1)] if args.feature_growth == "add" else \
-                   [args.features*2**i for i in range(0, args.levels)]
-    target_outputs = int(args.output_size * args.sr)
-    model = WaveunetLyrics(args.channels, num_features, args.channels, args.instruments, kernel_size=args.kernel_size,
-                     target_output_size=target_outputs, depth=args.depth, strides=args.strides,
-                     conv_type=args.conv_type, res=args.res, separate=args.separate)
+    down_features = [args.features*i for i in range(1, args.down_levels+1)] if args.feature_growth == "add" else \
+                   [args.features*2**i for i in range(0, args.down_levels)]
+    up_features = down_features[-args.up_levels:]
+
+    model = WaveunetLyrics(num_inputs=args.channels, num_channels=[down_features, up_features], num_outputs=args.num_class,
+                           kernel_size=[15, 5], input_size=352243, depth=args.depth,
+                           strides=args.strides, conv_type=args.conv_type, res=args.res)
 
     if args.cuda:
         # model = utils.DataParallel(model)
@@ -51,18 +51,11 @@ def main(args):
 
     # If not data augmentation, at least crop targets to fit model output shape
     # crop_func = partial(crop, shapes=model.shapes)
-    # Data augmentation function for training
-    # augment_func = partial(random_amplify, shapes=model.shapes, min=0.7, max=1.0)
-    # train_data = SeparationDataset(musdb, "train", args.instruments, args.sr, args.channels, model.shapes, True, args.hdf_dir, audio_transform=augment_func)
-    # val_data = SeparationDataset(musdb, "val", args.instruments, args.sr, args.channels, model.shapes, False, args.hdf_dir, audio_transform=crop_func)
-    # test_data = SeparationDataset(musdb, "test", args.instruments, args.sr, args.channels, model.shapes, False, args.hdf_dir, audio_transform=crop_func)
 
-    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, dummy=True)
     val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, dummy=True)
+    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, dummy=True)
 
     dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, worker_init_fn=utils.worker_init_fn)
-
-    exit()
 
     ##### TRAINING ####
 
@@ -130,6 +123,8 @@ def main(args):
 
                 pbar.update(1)
 
+        exit()
+
         # VALIDATE
         val_loss = validate(args, model, criterion, val_data)
         print("VALIDATION FINISHED: LOSS: " + str(val_loss))
@@ -183,8 +178,6 @@ def main(args):
 if __name__ == '__main__':
     ## TRAIN PARAMETERS
     parser = argparse.ArgumentParser()
-    parser.add_argument('--instruments', type=str, nargs='+', default=["bass", "drums", "other", "vocals"],
-                        help="List of instruments to separate (default: \"bass drums other vocals\")")
     parser.add_argument('--cuda', action='store_true',
                         help='Use CUDA (default: False)')
     parser.add_argument('--num_workers', type=int, default=1,
@@ -209,19 +202,21 @@ if __name__ == '__main__':
                         help='Number of LR cycles per epoch')
     parser.add_argument('--batch_size', type=int, default=4,
                         help="Batch size")
-    parser.add_argument('--levels', type=int, default=6,
-                        help="Number of DS/US blocks")
+    parser.add_argument('--down_levels', type=int, default=12,
+                        help="Number of DS blocks")
+    parser.add_argument('--up_levels', type=int, default=2,
+                        help="Number of US blocks")
     parser.add_argument('--depth', type=int, default=1,
                         help="Number of convs per block")
     parser.add_argument('--sr', type=int, default=22050,
                         help="Sampling rate")
-    parser.add_argument('--channels', type=int, default=2,
+    parser.add_argument('--channels', type=int, default=1,
                         help="Number of input audio channels")
     parser.add_argument('--kernel_size', type=int, default=5,
                         help="Filter width of kernels. Has to be an odd number")
-    parser.add_argument('--output_size', type=float, default=2.0,
+    parser.add_argument('--output_size', type=float, default= 10.22681,
                         help="Output duration")
-    parser.add_argument('--strides', type=int, default=4,
+    parser.add_argument('--strides', type=int, default=2,
                         help="Strides in Waveunet")
     parser.add_argument('--patience', type=int, default=20,
                         help="Patience for early stopping on validation set")
@@ -233,9 +228,9 @@ if __name__ == '__main__':
                         help="Type of convolution (normal, BN-normalised, GN-normalised): normal/bn/gn")
     parser.add_argument('--res', type=str, default="fixed",
                         help="Resampling strategy: fixed sinc-based lowpass filtering or learned conv layer: fixed/learned")
-    parser.add_argument('--separate', type=int, default=1,
-                        help="Train separate model for each source (1) or only one (0)")
-    parser.add_argument('--feature_growth', type=str, default="double",
+    parser.add_argument('--num_class', type=int, default=29,
+                        help="Number of predicted classes.")
+    parser.add_argument('--feature_growth', type=str, default="add",
                         help="How the features in each layer should grow, either (add) the initial number of features each time, or multiply by 2 (double)")
 
     args = parser.parse_args()

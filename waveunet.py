@@ -98,10 +98,24 @@ class DownsamplingBlock(nn.Module):
         return curr_size
 
 class WaveunetLyrics(nn.Module):
-    def __init__(self, num_inputs, num_channels, num_outputs, kernel_size, target_output_size, conv_type, res, depth=1, strides=2):
+    def __init__(self, num_inputs, num_channels, num_outputs, kernel_size, input_size, conv_type, res, depth=1, strides=2):
+        '''
+
+        :param num_inputs:              number of input channel (1)
+        :param num_channels:            channels of conv layers in each block
+        :param num_outputs:             number of output channel (29: {a, b, ..., z, ',  , eps})
+        :param kernel_size:             kernel size for conv layers [f_D, f_U]
+        :param input_size:              number of input samples
+        :param conv_type:               normalize type
+        :param res:                     resampling strategy
+        :param depth:                   conv depth (default 1)
+        :param strides:                 conv strides (default 2)
+        '''
+
         super(WaveunetLyrics, self).__init__()
 
-        self.num_levels = len(num_channels)
+        self.down_levels = len(num_channels[0])
+        self.up_levels = len(num_channels[1])
         self.strides = strides
         self.kernel_size = kernel_size
         self.num_inputs = num_inputs
@@ -109,7 +123,7 @@ class WaveunetLyrics(nn.Module):
         self.depth = depth
 
         # Only odd filter kernels allowed
-        assert(kernel_size % 2 == 1)
+        assert(kernel_size[0] % 2 == 1 and kernel_size[1] % 2 == 1)
 
         self.waveunets = nn.ModuleDict()
 
@@ -118,31 +132,31 @@ class WaveunetLyrics(nn.Module):
         module.downsampling_blocks = nn.ModuleList()
         module.upsampling_blocks = nn.ModuleList()
 
-        for i in range(self.num_levels - 1):
-            in_ch = num_inputs if i == 0 else num_channels[i]
+        for i in range(self.down_levels - 1):
+            in_ch = num_inputs if i == 0 else num_channels[0][i]
 
             module.downsampling_blocks.append(
-                DownsamplingBlock(in_ch, num_channels[i], num_channels[i+1], kernel_size, strides, depth, conv_type, res))
+                DownsamplingBlock(in_ch, num_channels[0][i], num_channels[0][i+1], kernel_size[0], strides, depth, conv_type, res))
 
-        for i in range(0, self.num_levels - 1):
+        for i in range(0, self.up_levels - 1):
             module.upsampling_blocks.append(
-                UpsamplingBlock(num_channels[-1-i], num_channels[-2-i], num_channels[-2-i], kernel_size, strides, depth, conv_type, res))
+                UpsamplingBlock(num_channels[0][-1-i], num_channels[0][-2-i], num_channels[0][-2-i], kernel_size[1], strides, depth, conv_type, res))
 
         module.bottlenecks = nn.ModuleList(
-            [ConvLayer(num_channels[-1], num_channels[-1], kernel_size, 1, conv_type) for _ in range(depth)])
+            [ConvLayer(num_channels[0][-1], num_channels[0][-1], kernel_size[0], 1, conv_type) for _ in range(depth)])
 
-        # Output conv
-        outputs = num_outputs
-        module.output_conv = nn.Conv1d(num_channels[0], outputs, 1)
+        # Output conv : outputs a probability matrix P
+        outputs = self.num_outputs
+        module.output_conv = nn.Conv1d(num_channels[0][-2], outputs, 1)
 
         self.waveunet = module
 
-        self.set_output_size(target_output_size)
+        self.set_output_size(input_size)
 
     def set_output_size(self, target_output_size):
         self.target_output_size = target_output_size
 
-        self.input_size, self.output_size = self.check_padding(target_output_size)
+        self.input_size, self.output_size = (352243, 225501)
         print("Using valid convolutions with " + str(self.input_size) + " inputs and " + str(self.output_size) + " outputs")
 
         assert((self.input_size - self.output_size) % 2 == 0)
@@ -151,35 +165,6 @@ class WaveunetLyrics(nn.Module):
                        "output_frames" : self.output_size,
                        "input_frames" : self.input_size}
 
-    def check_padding(self, target_output_size):
-        # Ensure number of outputs covers a whole number of cycles so each output in the cycle is weighted equally during training
-        bottleneck = 1
-
-        while True:
-            out = self.check_padding_for_bottleneck(bottleneck, target_output_size)
-            if out is not False:
-                return out
-            bottleneck += 1
-
-    def check_padding_for_bottleneck(self, bottleneck, target_output_size):
-        module = self.waveunet
-        try:
-            curr_size = bottleneck
-            for idx, block in enumerate(module.upsampling_blocks):
-                curr_size = block.get_output_size(curr_size)
-            output_size = curr_size
-
-            # Bottleneck-Conv
-            curr_size = bottleneck
-            for block in reversed(module.bottlenecks):
-                curr_size = block.get_input_size(curr_size)
-            for idx, block in enumerate(reversed(module.downsampling_blocks)):
-                curr_size = block.get_input_size(curr_size)
-
-            assert(output_size >= target_output_size)
-            return curr_size, output_size
-        except AssertionError as e:
-            return False
 
     def forward_module(self, x, module):
         '''
@@ -191,30 +176,46 @@ class WaveunetLyrics(nn.Module):
         shortcuts = []
         out = x
 
+        print(x.shape)
+
         # DOWNSAMPLING BLOCKS
         for block in module.downsampling_blocks:
             out, short = block(out)
+            print(out.shape, short.shape)
             shortcuts.append(short)
+
+        print("after downsampling blocks:", out.shape, len(shortcuts))
 
         # BOTTLENECK CONVOLUTION
         for conv in module.bottlenecks:
             out = conv(out)
+            print(out.shape)
+
+        print("after bottleneck convolution:", out.shape)
 
         # UPSAMPLING BLOCKS
         for idx, block in enumerate(module.upsampling_blocks):
             out = block(out, shortcuts[-1 - idx])
+            print(out.shape)
+
+        print("after downsampling blocks:", out.shape)
 
         # OUTPUT CONV
         out = module.output_conv(out)
-        if not self.training:  # At test time clip predictions to valid amplitude range
-            out = out.clamp(min=-1.0, max=1.0)
+
+        print("after output conv:", out.shape)
+
+        # if not self.training:  # At test time clip predictions to valid amplitude range
+        #     out = out.clamp(min=-1.0, max=1.0)
+
         return out
 
-    def forward(self, x, inst=None):
+    def forward(self, x):
         curr_input_size = x.shape[-1]
+        print(curr_input_size, self.input_size)
         assert(curr_input_size == self.input_size) # User promises to feed the proper input himself, to get the pre-calculated (NOT the originally desired) output size
 
-        return {inst : self.forward_module(x, self.waveunet)}
+        return self.forward_module(x, self.waveunet)
 
 class Waveunet(nn.Module):
     def __init__(self, num_inputs, num_channels, num_outputs, instruments, kernel_size, target_output_size, conv_type, res, separate=False, depth=1, strides=2):

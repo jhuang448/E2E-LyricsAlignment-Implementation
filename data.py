@@ -11,7 +11,7 @@ import DALI as dali_code
 from utils import load, write_wav
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 def getDALI(database_path, level, lang, genre):
     dali_annot_path = os.path.join(database_path, 'annot_tismir')
@@ -19,7 +19,7 @@ def getDALI(database_path, level, lang, genre):
     dali_data = dali_code.get_the_DALI_dataset(dali_annot_path, skip=[], keep=[])
 
     # get audio list
-    audio_list = os.listdir(os.path.join(dali_audio_path))[:100]
+    audio_list = os.listdir(os.path.join(dali_audio_path))
 
     subset = list()
     duration = list()
@@ -196,7 +196,7 @@ class LyricsAlignDataset(IterableDataset):
         # Open HDF5
         if self.hdf_dataset is None:
             driver = "core" if self.in_memory else None  # Load HDF5 fully into memory if desired
-            self.hdf_dataset = h5py.File(self.hdf_dir, 'r', driver=driver)
+            self.hdf_dataset = h5py.File(self.hdf_file, 'r', driver=driver)
 
         while True:
 
@@ -243,17 +243,20 @@ class LyricsAlignDataset(IterableDataset):
             # find the lyrics within (start_target_pos, end_target_pos)
             words_start_end_pos = self.hdf_dataset[str(song_idx)]["times"][:]
             first_word_to_include = next(x for x, val in enumerate(list(words_start_end_pos[:, 0]))
-                                         if val > start_target_pos)
+                                         if val > start_target_pos/self.sr)
             last_word_to_include = annot_num - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
-                                         if val < end_target_pos)
+                                         if val < end_target_pos/self.sr)
 
             targets = " "
             if first_word_to_include - 1 == last_word_to_include + 1: # the word covers the whole window
+                # invalid sample, skip
                 targets = None
                 continue
             if first_word_to_include <= last_word_to_include: # the window covers word[first:last+1]
-                targets = " ".join(list(self.hdf_dataset[str(song_idx)]["lyrics"]
-                              [first_word_to_include:last_word_to_include+1]))
+                lyrics = self.hdf_dataset[str(song_idx)]["lyrics"][first_word_to_include:last_word_to_include+1]
+                lyrics_list = [s[0].decode() for s in list(lyrics)]
+                targets = " ".join(lyrics_list)
+                targets = " ".join(targets.split())
 
             return audio, targets
 

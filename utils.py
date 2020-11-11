@@ -36,34 +36,15 @@ def compute_loss(model, inputs, targets, criterion, compute_grad=False):
     :param compute_grad: Whether to compute gradients
     :return: Model outputs, Average loss over batch
     '''
-    all_outputs = {}
 
-    if model.separate:
-        avg_loss = 0.0
-        num_sources = 0
-        for inst in model.instruments:
-            output = model(inputs, inst)
-            loss = criterion(output[inst], targets[inst])
+    loss = 0
+    all_outputs = model(inputs)
+    loss = criterion(all_outputs, targets)
 
-            if compute_grad:
-                loss.backward()
+    if compute_grad:
+        loss.backward()
 
-            avg_loss += loss.item()
-            num_sources += 1
-
-            all_outputs[inst] = output[inst].detach().clone()
-
-        avg_loss /= float(num_sources)
-    else:
-        loss = 0
-        all_outputs = model(inputs)
-        for inst in all_outputs.keys():
-            loss += criterion(all_outputs[inst], targets[inst])
-
-        if compute_grad:
-            loss.backward()
-
-        avg_loss = loss.item() / float(len(all_outputs))
+    avg_loss = loss.item()
 
     return all_outputs, avg_loss
 
