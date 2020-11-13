@@ -6,6 +6,7 @@ import utils
 import numpy as np
 import torch
 
+import time
 from utils import compute_loss
 
 def predict(audio, model):
@@ -129,28 +130,32 @@ def evaluate(args, dataset, model, instruments):
     return perfs
 
 
-def validate(args, model, criterion, test_data):
+def validate(args, model, target_frame, criterion, test_data, device):
     # PREPARE DATA
     dataloader = torch.utils.data.DataLoader(test_data,
                                              batch_size=args.batch_size,
                                              shuffle=False,
-                                             num_workers=args.num_workers)
+                                             num_workers=args.num_workers,
+                                             collate_fn=utils.my_collate)
 
     # VALIDATE
     model.eval()
     total_loss = 0.
     with tqdm(total=len(test_data) // args.batch_size) as pbar, torch.no_grad():
-        for example_num, (x, targets) in enumerate(dataloader):
-            if args.cuda:
-                x = x.cuda()
-                for k in list(targets.keys()):
-                    targets[k] = targets[k].cuda()
+        for example_num, _data in enumerate(dataloader):
+            x, _, seqs = _data
 
-            _, avg_loss = compute_loss(model, x, targets, criterion)
+            x = utils.move_data_to_device(x, device)
+            seqs = [utils.move_data_to_device(seq, device) for seq in seqs]
 
-            total_loss += (1. / float(example_num + 1)) * (avg_loss - total_loss)
+            avg_loss = utils.compute_loss(model, x, seqs, target_frame, criterion, compute_grad=False)
 
-            pbar.set_description("Current loss: {:.4f}".format(total_loss))
+            total_loss += avg_loss
+
+            pbar.set_description("Current loss: {:.4f}".format(avg_loss))
             pbar.update(1)
+
+            if example_num == len(test_data) // args.batch_size:
+                break
 
     return total_loss

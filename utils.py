@@ -4,6 +4,7 @@ import soundfile
 import torch
 import numpy as np
 import librosa
+import string
 
 def compute_output(model, inputs):
     '''
@@ -24,7 +25,15 @@ def compute_output(model, inputs):
 
     return all_outputs
 
-def compute_loss(model, inputs, targets, criterion, compute_grad=False):
+
+def my_collate(batch):
+    audio, targets, seqs = zip(*batch)
+    audio = np.array(audio)
+    targets = list(targets)
+    seqs = list(seqs)
+    return audio, targets, seqs
+
+def compute_loss(model, inputs, targets, target_frame, criterion, compute_grad=False):
     '''
     Computes gradients of model with given inputs and targets and loss function.
     Optionally backpropagates to compute gradients for weights.
@@ -39,14 +48,33 @@ def compute_loss(model, inputs, targets, criterion, compute_grad=False):
 
     loss = 0
     all_outputs = model(inputs)
-    loss = criterion(all_outputs, targets)
+
+    batch_num, _, input_length = all_outputs.shape
+    frame_offset = int((input_length - target_frame) / 2)
+
+    all_outputs = all_outputs[:, :, frame_offset:-frame_offset]
+    input_length = all_outputs.shape[2]
+
+    # all_outputs = torch.nn.functional.log_softmax(all_outputs, 1)
+    all_outputs = all_outputs.permute(2, 0, 1)
+    # print(all_outputs.shape)
+
+    input_lengths = [input_length] * batch_num
+    label_lengths = [len(target) for target in targets]
+
+    try:
+        loss = criterion(all_outputs, torch.cat(targets), input_lengths, label_lengths)
+    except:
+        print(all_outputs.shape, type(all_outputs))
+        print(targets)
+        print(input_lengths, label_lengths)
 
     if compute_grad:
         loss.backward()
 
     avg_loss = loss.item()
 
-    return all_outputs, avg_loss
+    return avg_loss
 
 def worker_init_fn(worker_id): # This is apparently needed to ensure workers have different random seeds and draw different examples!
     np.random.seed(np.random.get_state()[1][0] + worker_id)
@@ -72,6 +100,11 @@ def get_lr(optim):
 def set_lr(optim, lr):
     for g in optim.param_groups:
         g['lr'] = lr
+
+def update_lr(optimizer, epoch, update_step, lr):
+    new_lr = lr / (((epoch // (update_step * 1)) * 2) + 1)
+
+    set_lr(optimizer, new_lr)
 
 def set_cyclic_lr(optimizer, it, epoch_it, cycles, min_lr, max_lr):
     cycle_length = epoch_it // cycles
@@ -154,3 +187,13 @@ def seed_torch(seed=0):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+
+def move_data_to_device(x, device):
+    if 'float' in str(x.dtype):
+        x = torch.Tensor(x)
+    elif 'int' in str(x.dtype):
+        x = torch.LongTensor(x)
+    else:
+        return x
+
+    return x.to(device)

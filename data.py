@@ -5,6 +5,7 @@ import numpy as np
 from sortedcontainers import SortedList
 from torch.utils.data import Dataset, IterableDataset
 import glob
+import string
 
 from tqdm import tqdm
 import DALI as dali_code
@@ -110,7 +111,7 @@ def random_amplify(mix, targets, shapes, min, max):
     return crop(mix, targets, shapes)
 
 class LyricsAlignDataset(IterableDataset):
-    def __init__(self, dataset, partition, sr, shapes, hdf_dir, in_memory=False, dummy=False):
+    def __init__(self, dataset, partition, sr, shapes, hdf_dir, in_memory=False, dummy=False, pad_length=150):
         '''
 
         :param dataset:     a list of song with line level annotation
@@ -134,6 +135,7 @@ class LyricsAlignDataset(IterableDataset):
         self.shapes = shapes
         self.hop = (shapes["output_frames"] // 2)
         self.in_memory = in_memory
+        self.pad_length = pad_length
 
         # PREPARE HDF FILE
 
@@ -168,7 +170,7 @@ class LyricsAlignDataset(IterableDataset):
                     grp.create_dataset("times", shape=(annot_num, 2), dtype=times.dtype, data=times)
 
         # In that case, check whether sr and channels are complying with the audio in the HDF file, otherwise raise error
-        with h5py.File(self.hdf_file, "r") as f:
+        with h5py.File(self.hdf_file, "r", libver='latest', swmr=True) as f:
             if f.attrs["sr"] != sr:
                 raise ValueError(
                     "Tried to load existing HDF file, but sampling rate is not as expected. Did you load an out-dated HDF file?")
@@ -188,77 +190,116 @@ class LyricsAlignDataset(IterableDataset):
         self.start_pos = SortedList(np.cumsum(lengths))
         self.length = self.start_pos[-1]
 
-    def __iter__(self):
-        return self
+        self.shuffled_buffer = np.arange(self.length)
+        self.shuffle_data_list()
 
-    def __next__(self):
+    def shuffle_data_list(self):
+        np.random.shuffle(self.shuffled_buffer)
+
+    def __iter__(self):
 
         # Open HDF5
         if self.hdf_dataset is None:
             driver = "core" if self.in_memory else None  # Load HDF5 fully into memory if desired
             self.hdf_dataset = h5py.File(self.hdf_file, 'r', driver=driver)
 
+
         while True:
+            for i in np.arange(self.length):
 
-            index = np.random.randint(self.length)
+                # index = np.random.randint(self.length)
+                index = self.shuffled_buffer[i]
 
-            # Find out which slice of targets we want to read
-            song_idx = self.start_pos.bisect_right(index)
-            if song_idx > 0:
-                index = index - self.start_pos[song_idx - 1]
+                # Find out which slice of targets we want to read
+                song_idx = self.start_pos.bisect_right(index)
+                if song_idx > 0:
+                    index = index - self.start_pos[song_idx - 1]
 
-            # Check length of audio signal
-            audio_length = self.hdf_dataset[str(song_idx)].attrs["input_length"]
-            annot_num = self.hdf_dataset[str(song_idx)].attrs["annot_num"]
-            target_length = self.shapes["output_frames"]
+                # Check length of audio signal
+                audio_length = self.hdf_dataset[str(song_idx)].attrs["input_length"]
+                annot_num = self.hdf_dataset[str(song_idx)].attrs["annot_num"]
+                target_length = self.shapes["output_frames"]
 
-            # Determine position where to start targets
-            start_target_pos = index * self.hop
-            end_target_pos = start_target_pos + self.shapes["output_frames"]
+                # Determine position where to start targets
+                start_target_pos = index * self.hop
+                end_target_pos = start_target_pos + self.shapes["output_frames"]
 
-            # READ INPUTS
-            # Check front padding
-            start_pos = start_target_pos - self.shapes["output_start_frame"]
-            if start_pos < 0:
-                # Pad manually since audio signal was too short
-                pad_front = abs(start_pos)
-                start_pos = 0
-            else:
-                pad_front = 0
+                # READ INPUTS
+                # Check front padding
+                start_pos = start_target_pos - self.shapes["output_start_frame"]
+                if start_pos < 0:
+                    # Pad manually since audio signal was too short
+                    pad_front = abs(start_pos)
+                    start_pos = 0
+                else:
+                    pad_front = 0
 
-            # Check back padding
-            end_pos = start_target_pos - self.shapes["output_start_frame"] + self.shapes["input_frames"]
-            if end_pos > audio_length:
-                # Pad manually since audio signal was too short
-                pad_back = end_pos - audio_length
-                end_pos = audio_length
-            else:
-                pad_back = 0
+                # Check back padding
+                end_pos = start_target_pos - self.shapes["output_start_frame"] + self.shapes["input_frames"]
+                if end_pos > audio_length:
+                    # Pad manually since audio signal was too short
+                    pad_back = end_pos - audio_length
+                    end_pos = audio_length
+                else:
+                    pad_back = 0
 
-            # read audio and zero padding
-            audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
-            if pad_front > 0 or pad_back > 0:
-                audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
+                # read audio and zero padding
+                audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
+                if pad_front > 0 or pad_back > 0:
+                    audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
 
-            # find the lyrics within (start_target_pos, end_target_pos)
-            words_start_end_pos = self.hdf_dataset[str(song_idx)]["times"][:]
-            first_word_to_include = next(x for x, val in enumerate(list(words_start_end_pos[:, 0]))
-                                         if val > start_target_pos/self.sr)
-            last_word_to_include = annot_num - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
-                                         if val < end_target_pos/self.sr)
+                # find the lyrics within (start_target_pos, end_target_pos)
+                words_start_end_pos = self.hdf_dataset[str(song_idx)]["times"][:]
+                try:
+                    first_word_to_include = next(x for x, val in enumerate(list(words_start_end_pos[:, 0]))
+                                                 if val > start_target_pos/self.sr)
+                except StopIteration:
+                    first_word_to_include = np.Inf
 
-            targets = " "
-            if first_word_to_include - 1 == last_word_to_include + 1: # the word covers the whole window
-                # invalid sample, skip
-                targets = None
-                continue
-            if first_word_to_include <= last_word_to_include: # the window covers word[first:last+1]
-                lyrics = self.hdf_dataset[str(song_idx)]["lyrics"][first_word_to_include:last_word_to_include+1]
-                lyrics_list = [s[0].decode() for s in list(lyrics)]
-                targets = " ".join(lyrics_list)
-                targets = " ".join(targets.split())
+                try:
+                    last_word_to_include = annot_num - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
+                                                 if val < end_target_pos/self.sr)
+                except StopIteration:
+                    last_word_to_include = -np.Inf
 
-            return audio, targets
+                targets = " "
+                if first_word_to_include - 1 == last_word_to_include + 1: # the word covers the whole window
+                    # invalid sample, skip
+                    targets = None
+                    continue
+                if first_word_to_include <= last_word_to_include: # the window covers word[first:last+1]
+                    lyrics = self.hdf_dataset[str(song_idx)]["lyrics"][first_word_to_include:last_word_to_include+1]
+                    lyrics_list = [s[0].decode() for s in list(lyrics)]
+                    targets = " ".join(lyrics_list)
+                    targets = " ".join(targets.split())
+
+                if len(targets) > 120:
+                    continue
+
+                seq = self.text2seq(targets)
+
+                # print(len(seq))
+
+                yield audio, targets, seq
+
+            self.shuffle_data_list()
+
+    def text2seq(self, text):
+        seq = []
+        for c in text.lower():
+            idx = string.ascii_lowercase.find(c)
+            if idx == -1:
+                if c == "'":
+                    idx = 26
+                elif c == " ":
+                    idx = 27
+                else:
+                    continue # remove unknown characters
+            seq.append(idx)
+        if len(seq) == 0:
+            seq.append(27)
+        return np.array(seq)
+
 
     def __len__(self):
         return self.length

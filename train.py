@@ -1,16 +1,15 @@
 import argparse
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-
 import time
 from functools import partial
 
 import torch
-import pickle
+import pickle, sys
 import numpy as np
 
 import torch.nn as nn
+from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim import Adam
 from tqdm import tqdm
@@ -18,10 +17,11 @@ from tqdm import tqdm
 import utils
 # from data import get_musdb_folds, SeparationDataset, random_amplify, crop
 from data import get_dali_folds, LyricsAlignDataset
-# from test import evaluate, validate
+from test import evaluate, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
 
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
@@ -35,15 +35,21 @@ def main(args):
                            kernel_size=[15, 5], input_size=352243, depth=args.depth,
                            strides=args.strides, conv_type=args.conv_type, res=args.res)
 
-    if args.cuda:
-        # model = utils.DataParallel(model)
+    target_frame = int(225501/1024)
+
+    device = 'cuda' if (args.cuda and torch.cuda.is_available()) else 'cpu'
+
+    if 'cuda' in device:
+        model = utils.DataParallel(model)
         print("move model to gpu")
         model.cuda()
 
     # print('model: ', model)
     print('parameter count: ', str(sum(p.numel() for p in model.parameters())))
 
-    writer = SummaryWriter(args.log_dir)
+    import datetime
+    current = datetime.datetime.now()
+    writer = SummaryWriter(args.log_dir + current.strftime("%m:%d:%H:%M"))
 
     ### DATASET
     # dali_split = get_dali_folds(args.dataset_dir, level="words")
@@ -52,18 +58,20 @@ def main(args):
     # If not data augmentation, at least crop targets to fit model output shape
     # crop_func = partial(crop, shapes=model.shapes)
 
-    val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, dummy=True)
-    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, dummy=True)
+    val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, dummy=args.dummy)
+    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, dummy=args.dummy)
 
-    dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, worker_init_fn=utils.worker_init_fn)
+    print("dummy?", args.dummy, len(train_data), len(val_data))
+
+    dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers,
+                                             worker_init_fn=utils.worker_init_fn,
+                                             collate_fn=utils.my_collate)
 
     ##### TRAINING ####
 
     # Set up the loss function
-    if args.loss == "L1":
-        criterion = nn.L1Loss()
-    elif args.loss == "L2":
-        criterion = nn.MSELoss()
+    if args.loss == "CTC":
+        criterion = nn.CTCLoss(blank=28).to(device)
     else:
         raise NotImplementedError("Couldn't find this loss!")
 
@@ -83,26 +91,32 @@ def main(args):
 
     print('TRAINING START')
     while state["worse_epochs"] < args.patience:
-        print("Training one epoch from iteration " + str(state["step"]))
+        print("Training one epoch from epoch " + str(state["epochs"]))
         avg_time = 0.
         model.train()
+        train_loss = 0.
         with tqdm(total=len(train_data) // args.batch_size) as pbar:
-            np.random.seed()
-            for example_num, (x, targets) in enumerate(dataloader):
-                if args.cuda:
-                    x = x.cuda()
-                    for k in list(targets.keys()):
-                        targets[k] = targets[k].cuda()
+
+            for example_num, _data in enumerate(dataloader):
+
+                x,  targets, seqs = _data
+
+                x = utils.move_data_to_device(x, device)
+                seqs = [utils.move_data_to_device(seq, device) for seq in seqs]
 
                 t = time.time()
 
                 # Set LR for this iteration
-                utils.set_cyclic_lr(optimizer, example_num, len(train_data) // args.batch_size, args.cycles, args.min_lr, args.lr)
+                # utils.set_cyclic_lr(optimizer, example_num, len(train_data) // args.batch_size, args.cycles, args.min_lr, args.lr)
+                utils.update_lr(optimizer, state["epochs"], 1, args.lr)
+
                 writer.add_scalar("lr", utils.get_lr(optimizer), state["step"])
+                # print(utils.get_lr(optimizer))
 
                 # Compute loss for each instrument/model
                 optimizer.zero_grad()
-                outputs, avg_loss = utils.compute_loss(model, x, targets, criterion, compute_grad=True)
+                model.zero_grad()
+                avg_loss = utils.compute_loss(model, x, seqs, target_frame, criterion, compute_grad=True)
 
                 optimizer.step()
 
@@ -111,24 +125,26 @@ def main(args):
                 t = time.time() - t
                 avg_time += (1. / float(example_num + 1)) * (t - avg_time)
 
-                writer.add_scalar("train_loss", avg_loss, state["step"])
+                writer.add_scalar("train/step_loss", avg_loss, state["step"])
 
-                if example_num % args.example_freq == 0:
-                    input_centre = torch.mean(x[0, :, model.shapes["output_start_frame"]:model.shapes["output_end_frame"]], 0) # Stereo not supported for logs yet
-                    writer.add_audio("input", input_centre, state["step"], sample_rate=args.sr)
+                # print(avg_loss)
+                train_loss += avg_loss
 
-                    for inst in outputs.keys():
-                        writer.add_audio(inst + "_pred", torch.mean(outputs[inst][0], 0), state["step"], sample_rate=args.sr)
-                        writer.add_audio(inst + "_target", torch.mean(targets[inst][0], 0), state["step"], sample_rate=args.sr)
-
+                pbar.set_description("Current loss: {:.4f}".format(avg_loss))
                 pbar.update(1)
 
-        exit()
+                if example_num == len(train_data) // args.batch_size:
+                    break
+
+        train_loss /= (len(train_data) // args.batch_size)
+        print("Train Loss: {:.4f}".format(train_loss))
+        writer.add_scalar("train/epoch_loss", train_loss, state["epochs"])
 
         # VALIDATE
-        val_loss = validate(args, model, criterion, val_data)
+        val_loss = validate(args, model, target_frame, criterion, val_data, device)
+        val_loss /= (len(val_data) // args.batch_size)
         print("VALIDATION FINISHED: LOSS: " + str(val_loss))
-        writer.add_scalar("val_loss", val_loss, state["step"])
+        writer.add_scalar("val/loss", val_loss, state["epochs"])
 
         # EARLY STOPPING CHECK
         checkpoint_path = os.path.join(args.checkpoint_dir, "checkpoint_" + str(state["step"]))
@@ -148,30 +164,30 @@ def main(args):
 
     #### TESTING ####
     # Test loss
-    print("TESTING")
-
-    # Load best model based on validation loss
-    state = utils.load_model(model, None, state["best_checkpoint"], args.cuda)
-    test_loss = validate(args, model, criterion, test_data)
-    print("TEST FINISHED: LOSS: " + str(test_loss))
-    writer.add_scalar("test_loss", test_loss, state["step"])
-
-    # Mir_eval metrics
-    test_metrics = evaluate(args, musdb["test"], model, args.instruments)
-
-    # Dump all metrics results into pickle file for later analysis if needed
-    with open(os.path.join(args.checkpoint_dir, "results.pkl"), "wb") as f:
-        pickle.dump(test_metrics, f)
-
-    # Write most important metrics into Tensorboard log
-    avg_SDRs = {inst : np.mean([np.nanmean(song[inst]["SDR"]) for song in test_metrics]) for inst in args.instruments}
-    avg_SIRs = {inst : np.mean([np.nanmean(song[inst]["SIR"]) for song in test_metrics]) for inst in args.instruments}
-    for inst in args.instruments:
-        writer.add_scalar("test_SDR_" + inst, avg_SDRs[inst], state["step"])
-        writer.add_scalar("test_SIR_" + inst, avg_SIRs[inst], state["step"])
-    overall_SDR = np.mean([v for v in avg_SDRs.values()])
-    writer.add_scalar("test_SDR", overall_SDR)
-    print("SDR: " + str(overall_SDR))
+    # print("TESTING")
+    #
+    # # Load best model based on validation loss
+    # state = utils.load_model(model, None, state["best_checkpoint"], args.cuda)
+    # test_loss = validate(args, model, criterion, test_data)
+    # print("TEST FINISHED: LOSS: " + str(test_loss))
+    # writer.add_scalar("test_loss", test_loss, state["step"])
+    #
+    # # Mir_eval metrics
+    # test_metrics = evaluate(args, musdb["test"], model, args.instruments)
+    #
+    # # Dump all metrics results into pickle file for later analysis if needed
+    # with open(os.path.join(args.checkpoint_dir, "results.pkl"), "wb") as f:
+    #     pickle.dump(test_metrics, f)
+    #
+    # # Write most important metrics into Tensorboard log
+    # avg_SDRs = {inst : np.mean([np.nanmean(song[inst]["SDR"]) for song in test_metrics]) for inst in args.instruments}
+    # avg_SIRs = {inst : np.mean([np.nanmean(song[inst]["SIR"]) for song in test_metrics]) for inst in args.instruments}
+    # for inst in args.instruments:
+    #     writer.add_scalar("test_SDR_" + inst, avg_SDRs[inst], state["step"])
+    #     writer.add_scalar("test_SIR_" + inst, avg_SIRs[inst], state["step"])
+    # overall_SDR = np.mean([v for v in avg_SDRs.values()])
+    # writer.add_scalar("test_SDR", overall_SDR)
+    # print("SDR: " + str(overall_SDR))
 
     writer.close()
 
@@ -180,9 +196,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', action='store_true',
                         help='Use CUDA (default: False)')
+    parser.add_argument('--dummy', action='store_true',
+                        help='Use dummy train/val sets (default: False)')
     parser.add_argument('--num_workers', type=int, default=1,
                         help='Number of data loader worker threads (default: 1)')
-    parser.add_argument('--features', type=int, default=32,
+    parser.add_argument('--features', type=int, default=24,
                         help='Number of feature channels per layer')
     parser.add_argument('--log_dir', type=str, default='logs/waveunet',
                         help='Folder to write logs into')
@@ -194,13 +212,13 @@ if __name__ == '__main__':
                         help='Folder to write checkpoints into')
     parser.add_argument('--load_model', type=str, default=None,
                         help='Reload a previously trained model (whole task model)')
-    parser.add_argument('--lr', type=float, default=1e-3,
+    parser.add_argument('--lr', type=float, default=1e-4,
                         help='Initial learning rate in LR cycle (default: 1e-3)')
     parser.add_argument('--min_lr', type=float, default=5e-5,
                         help='Minimum learning rate in LR cycle (default: 5e-5)')
     parser.add_argument('--cycles', type=int, default=2,
                         help='Number of LR cycles per epoch')
-    parser.add_argument('--batch_size', type=int, default=4,
+    parser.add_argument('--batch_size', type=int, default=8,
                         help="Batch size")
     parser.add_argument('--down_levels', type=int, default=12,
                         help="Number of DS blocks")
@@ -222,8 +240,8 @@ if __name__ == '__main__':
                         help="Patience for early stopping on validation set")
     parser.add_argument('--example_freq', type=int, default=200,
                         help="Write an audio summary into Tensorboard logs every X training iterations")
-    parser.add_argument('--loss', type=str, default="L1",
-                        help="L1 or L2")
+    parser.add_argument('--loss', type=str, default="CTC",
+                        help="CTC")
     parser.add_argument('--conv_type', type=str, default="gn",
                         help="Type of convolution (normal, BN-normalised, GN-normalised): normal/bn/gn")
     parser.add_argument('--res', type=str, default="fixed",

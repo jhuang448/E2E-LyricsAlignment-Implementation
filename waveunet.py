@@ -176,43 +176,46 @@ class WaveunetLyrics(nn.Module):
         shortcuts = []
         out = x
 
-        print(x.shape)
+        # print(x.shape)
 
         # DOWNSAMPLING BLOCKS
         for block in module.downsampling_blocks:
             out, short = block(out)
-            print(out.shape, short.shape)
+            # print(out.shape, short.shape)
             shortcuts.append(short)
 
-        print("after downsampling blocks:", out.shape, len(shortcuts))
+        # print("after downsampling blocks:", out.shape, len(shortcuts))
 
         # BOTTLENECK CONVOLUTION
         for conv in module.bottlenecks:
             out = conv(out)
-            print(out.shape)
+            # print(out.shape)
 
-        print("after bottleneck convolution:", out.shape)
+        # print("after bottleneck convolution:", out.shape)
 
         # UPSAMPLING BLOCKS
         for idx, block in enumerate(module.upsampling_blocks):
             out = block(out, shortcuts[-1 - idx])
-            print(out.shape)
+            # print(out.shape)
 
-        print("after downsampling blocks:", out.shape)
+        # print("after downsampling blocks:", out.shape)
 
         # OUTPUT CONV
         out = module.output_conv(out)
 
-        print("after output conv:", out.shape)
+        # print("after output conv:", out.shape)
 
         # if not self.training:  # At test time clip predictions to valid amplitude range
         #     out = out.clamp(min=-1.0, max=1.0)
+
+        # log_softmax
+        out = nn.functional.log_softmax(out, 1)
 
         return out
 
     def forward(self, x):
         curr_input_size = x.shape[-1]
-        print(curr_input_size, self.input_size)
+        # print(curr_input_size, self.input_size)
         assert(curr_input_size == self.input_size) # User promises to feed the proper input himself, to get the pre-calculated (NOT the originally desired) output size
 
         return self.forward_module(x, self.waveunet)
