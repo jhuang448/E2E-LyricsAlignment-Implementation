@@ -21,14 +21,13 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
 
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
 
     # MODEL
-    down_features = [args.features*i for i in range(1, args.down_levels+1)] if args.feature_growth == "add" else \
-                   [args.features*2**i for i in range(0, args.down_levels)]
+    down_features = [args.features*i for i in range(1, args.down_levels+2)] # [args.features*2**i for i in range(0, args.down_levels+1)]
     up_features = down_features[-args.up_levels:]
 
     model = WaveunetLyrics(num_inputs=args.channels, num_channels=[down_features, up_features], num_outputs=args.num_class,

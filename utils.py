@@ -50,9 +50,9 @@ def compute_loss(model, inputs, targets, target_frame, criterion, compute_grad=F
     all_outputs = model(inputs)
 
     batch_num, _, input_length = all_outputs.shape
-    frame_offset = int((input_length - target_frame) / 2)
+    # frame_offset = int((input_length - target_frame) / 2)
 
-    all_outputs = all_outputs[:, :, frame_offset:-frame_offset]
+    # all_outputs = all_outputs[:, :, frame_offset:-frame_offset]
     input_length = all_outputs.shape[2]
 
     # all_outputs = torch.nn.functional.log_softmax(all_outputs, 1)
