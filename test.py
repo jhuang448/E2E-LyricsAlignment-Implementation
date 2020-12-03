@@ -4,12 +4,14 @@ from tqdm import tqdm
 import utils
 
 import numpy as np
-import torch
+import torch, os
 
 import time
 from utils import compute_loss
 
-def predict(audio, model):
+import matplotlib.pyplot as plt
+
+def predict_old(audio, model):
     if isinstance(audio, torch.Tensor):
         is_cuda = audio.is_cuda()
         audio = audio.detach().cpu().numpy()
@@ -77,7 +79,7 @@ def predict_song(args, audio_path, model):
     # resample to model sampling rate
     mix_audio = utils.resample(mix_audio, mix_sr, args.sr)
 
-    sources = predict(mix_audio, model)
+    sources = predict_old(mix_audio, model)
 
     # Resample back to mixture sampling rate in case we had model on different sampling rate
     sources = {key : utils.resample(sources[key], args.sr, mix_sr) for key in sources.keys()}
@@ -106,33 +108,73 @@ def predict_song(args, audio_path, model):
 
     return sources
 
-def evaluate(args, dataset, model, instruments):
-    perfs = list()
-    model.eval()
-    with torch.no_grad():
-        for example in dataset:
-            print("Evaluating " + example["mix"])
+def predict(args, model, target_frame, test_data, device):
 
-            # Load source references in their original sr and channel number
-            target_sources = np.stack([utils.load(example[instrument], sr=None, mono=False)[0].T for instrument in instruments])
+    if not os.path.exists(args.pred_dir):
+        os.makedirs(args.pred_dir)
 
-            # Predict using mixture
-            pred_sources = predict_song(args, example["mix"], model)
-            pred_sources = np.stack([pred_sources[key].T for key in instruments])
+    if not os.path.exists('pics'):
+        os.makedirs('pics')
 
-            # Evaluate
-            SDR, ISR, SIR, SAR, _ = museval.metrics.bss_eval(target_sources, pred_sources)
-            song = {}
-            for idx, name in enumerate(instruments):
-                song[name] = {"SDR" : SDR[idx], "ISR" : ISR[idx], "SIR" : SIR[idx], "SAR" : SAR[idx]}
-            perfs.append(song)
-
-    return perfs
-
-
-def validate(args, model, target_frame, criterion, test_data, device):
     # PREPARE DATA
     dataloader = torch.utils.data.DataLoader(test_data,
+                                             batch_size=1,
+                                             shuffle=False,
+                                             num_workers=args.num_workers,
+                                             collate_fn=utils.my_collate)
+    model.eval()
+    with tqdm(total=len(test_data) // args.batch_size) as pbar, torch.no_grad():
+        for example_num, _data in enumerate(dataloader):
+            x, idx, texts = _data
+            idx = idx[0]
+            words, audio_name = texts[0]
+
+            x = utils.move_data_to_device(x, device)
+            x = x.squeeze(0)
+
+            # Predict
+            all_outputs = model(x)
+
+            batch_num, _, output_length = all_outputs.shape
+            frame_offset = int((output_length - target_frame) / 2)
+
+            all_outputs = all_outputs[:, :, frame_offset:-frame_offset]
+            output_length = all_outputs.shape[2]
+
+            all_outputs = all_outputs.transpose(1,2)
+            # print(all_outputs.shape) # batch, length, classes
+            _, _, num_classes = all_outputs.shape
+
+            plt.matshow(np.exp(all_outputs[2]))
+            plt.savefig('./pics/' + audio_name + '_2.png')
+
+            song_pred = all_outputs.data.numpy().reshape(-1, num_classes)
+            # print(song_pred.shape) # total_length, num_classes
+            # total_length = song_pred.shape[0]
+
+            # smoothing
+            # P_noise = np.random.uniform(low=1e-11, high=1e-10, size=song_pred.shape)
+            # song_pred = np.log(np.exp(song_pred) + P_noise)
+
+            # Dynamic programming
+            # word_align, score = utils.alignment(song_pred, words, idx)
+            # print(score)
+            #
+            # resolution = 225501 / output_length / args.sr
+            #
+            # # write
+            # with open(os.path.join(args.pred_dir, audio_name + "_align.csv"), 'w') as f:
+            #     for word in word_align:
+            #         f.write("{},{}\n".format(word[0] * resolution, word[1] * resolution))
+
+            pbar.update(1)
+
+    return -1
+
+
+def validate(args, model, target_frame, criterion, val_data, device):
+    # PREPARE DATA
+    dataloader = torch.utils.data.DataLoader(val_data,
                                              batch_size=args.batch_size,
                                              shuffle=False,
                                              num_workers=args.num_workers,
@@ -141,7 +183,7 @@ def validate(args, model, target_frame, criterion, test_data, device):
     # VALIDATE
     model.eval()
     total_loss = 0.
-    with tqdm(total=len(test_data) // args.batch_size) as pbar, torch.no_grad():
+    with tqdm(total=len(val_data) // args.batch_size) as pbar, torch.no_grad():
         for example_num, _data in enumerate(dataloader):
             x, _, seqs = _data
 
@@ -155,7 +197,7 @@ def validate(args, model, target_frame, criterion, test_data, device):
             pbar.set_description("Current loss: {:.4f}".format(avg_loss))
             pbar.update(1)
 
-            if example_num == len(test_data) // args.batch_size:
+            if example_num == len(val_data) // args.batch_size:
                 break
 
     return total_loss

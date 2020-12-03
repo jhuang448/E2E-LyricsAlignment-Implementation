@@ -17,7 +17,7 @@ from tqdm import tqdm
 import utils
 # from data import get_musdb_folds, SeparationDataset, random_amplify, crop
 from data import get_dali_folds, LyricsAlignDataset
-from test import evaluate, validate
+from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)

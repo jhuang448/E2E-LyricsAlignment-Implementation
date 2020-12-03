@@ -91,6 +91,45 @@ def load(path, sr=22050, mono=True, mode="numpy", offset=0.0, duration=None):
 
     return y, curr_sr
 
+def load_lyrics(lyrics_file):
+    from string import ascii_lowercase
+    d = {ascii_lowercase[i]: i for i in range(26)}
+    d["'"] = 26
+    d[" "] = 27
+    d["~"] = 28
+
+    # process raw
+    with open(lyrics_file + '.raw.txt', 'r') as f:
+        raw_lines = f.read().splitlines()
+    # concat
+    full_lyrics = " ".join(raw_lines)
+    # remove multiple spaces
+    full_lyrics = " ".join(full_lyrics.split())
+    # remove unknown characters
+    full_lyrics = "".join([c for c in full_lyrics.lower() if c in d.keys()])
+    full_lyrics = " " + full_lyrics + " "
+
+    # split to words
+    with open(lyrics_file + '.words.txt', 'r') as f:
+        words_lines = f.read().splitlines()
+    idx = []
+    last_end = 0
+    for i in range(len(words_lines)):
+        word = words_lines[i]
+        try:
+            assert(word[0] in ascii_lowercase)
+        except:
+            print(word)
+        new_word = "".join([c for c in word.lower() if c in d.keys()])
+        offset = full_lyrics[last_end:].find(new_word)
+        assert (offset >= 0)
+        assert(new_word == full_lyrics[last_end+offset:last_end+offset+len(new_word)])
+        idx.append([last_end+offset, last_end+offset+len(new_word)])
+        last_end += offset + len(new_word)
+
+    return full_lyrics, words_lines, idx
+
+
 def write_wav(path, audio, sr):
     soundfile.write(path, audio.T, sr, "PCM_16")
 
@@ -102,7 +141,9 @@ def set_lr(optim, lr):
         g['lr'] = lr
 
 def update_lr(optimizer, epoch, update_step, lr):
-    new_lr = lr / (((epoch // (update_step * 1)) * 2) + 1)
+    new_lr = lr / (((epoch // (update_step * 3)) * 2) + 1)
+    new_lr = np.max([1e-5, new_lr])
+
 
     set_lr(optimizer, new_lr)
 
@@ -197,3 +238,96 @@ def move_data_to_device(x, device):
         return x
 
     return x.to(device)
+
+def alignment(song_pred, lyrics, idx):
+    audio_length, num_class = song_pred.shape
+    lyrics_int = text2seq(lyrics)
+    lyrics_length = len(lyrics_int)
+
+    s = np.zeros((audio_length, lyrics_length))
+    opt = np.zeros((audio_length, lyrics_length))
+
+    blank = 28
+
+    # init
+    s[0][0] = song_pred[0][lyrics_int[0]]
+    # insert eps
+    for i in np.arange(1, audio_length):
+        s[i][0] = s[i-1][0] + song_pred[i][blank]
+    for j in np.arange(1, lyrics_length):
+        s[j][j] = s[j-1][j-1] + song_pred[j][lyrics_int[j]]
+        opt[j][j] = 1
+
+    for audio_pos in np.arange(2, audio_length):
+
+        for ch_pos in np.arange(1, lyrics_length):
+
+            if ch_pos >= audio_pos:
+                break
+
+            # insert eps
+            a = s[audio_pos-1][ch_pos] + song_pred[audio_pos][blank]
+            # next ch
+            b = s[audio_pos-1][ch_pos-1] + song_pred[audio_pos][lyrics_int[ch_pos]]
+            if b > a:
+                s[audio_pos][ch_pos] = b
+                opt[audio_pos][ch_pos] = 1
+            else:
+                s[audio_pos][ch_pos] = a
+
+    score = s[audio_length-1][lyrics_length-1]
+
+    # retrive optimal path
+    path = []
+    x = audio_length-1
+    y = lyrics_length-1
+    path.append([x, y])
+    while x > 0 or y > 0:
+        if opt[x][y] == 1:
+            x -= 1
+            y -= 1
+        else:
+            x -= 1
+        path.append([x, y])
+
+    path = list(reversed(path))
+    word_align = []
+    path_i = 0
+
+    word_i = 0
+    while word_i < len(idx):
+        # e.g. "happy day"
+        # find the first time "h" appears
+        if path[path_i][1] == idx[word_i][0]:
+            st = path[path_i][0]
+            # find the first time " " appears after "h"
+            while (path[path_i][1] != idx[word_i][1]):
+                path_i += 1
+            ed = path[path_i][0]
+            # append
+            word_align.append([st, ed])
+            # move to next word
+            word_i += 1
+        else:
+            # move to next audio frame
+            path_i += 1
+
+    return word_align, score
+
+
+
+def text2seq(text):
+    seq = []
+    for c in text.lower():
+        idx = string.ascii_lowercase.find(c)
+        if idx == -1:
+            if c == "'":
+                idx = 26
+            elif c == " ":
+                idx = 27
+            else:
+                continue # remove unknown characters
+        seq.append(idx)
+    if len(seq) == 0:
+        seq.append(27)
+    return np.array(seq)
