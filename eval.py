@@ -9,12 +9,11 @@ from data import JamendoLyricsDataset
 from waveunet import WaveunetLyrics
 import utils, test
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 def main(args):
     # MODEL
-    down_features = [args.features * i for i in range(1, args.down_levels + 1)] if args.feature_growth == "add" else \
-        [args.features * 2 ** i for i in range(0, args.down_levels)]
+    down_features = [args.features*i for i in range(1, args.down_levels+2)] # [args.features*2**i for i in range(0, args.down_levels+1)]
     up_features = down_features[-args.up_levels:]
 
     model = WaveunetLyrics(num_inputs=args.channels, num_channels=[down_features, up_features],
@@ -28,6 +27,7 @@ def main(args):
 
     if 'cuda' in device:
         print("move model to gpu")
+        model = utils.DataParallel(model)
         model.cuda()
 
     # print('model: ', model)
@@ -36,6 +36,8 @@ def main(args):
     print("Loading full model from checkpoint " + str(args.load_model))
 
     state = utils.load_model(model, None, args.load_model, args.cuda)
+
+    test_data = JamendoLyricsDataset(args.sr, model.shapes, args.hdf_dir, args.dataset, args.audio_dir)
 
     results = test.predict(args, model, target_frame, test_data, device)
 
@@ -55,11 +57,9 @@ if __name__ == '__main__':
                         help='Dataset name')
     parser.add_argument('--hdf_dir', type=str, default="hdf",
                         help='Dataset path')
-    parser.add_argument('--pred_dir', type=str, default="predict",
+    parser.add_argument('--pred_dir', type=str, default="predict_smooth",
                         help='prediction path')
-    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet/checkpoint_773092
-    test_data = JamendoLyricsDataset(args.sr, model.shapes, args.hdf_dir, args.dataset, args.audio_dir)
-',
+    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet/checkpoint_181904',
                         help='Reload a previously trained model (whole task model)')
     parser.add_argument('--batch_size', type=int, default=1,
                         help="Batch size")

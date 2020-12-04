@@ -21,7 +21,7 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
@@ -107,14 +107,14 @@ def main(args):
 
                 # Set LR for this iteration
                 # utils.set_cyclic_lr(optimizer, example_num, len(train_data) // args.batch_size, args.cycles, args.min_lr, args.lr)
-                utils.update_lr(optimizer, state["epochs"], 1, args.lr)
+                # utils.update_lr(optimizer, state["epochs"], 1, args.lr)
 
                 writer.add_scalar("lr", utils.get_lr(optimizer), state["step"])
                 # print(utils.get_lr(optimizer))
 
                 # Compute loss for each instrument/model
                 optimizer.zero_grad()
-                model.zero_grad()
+
                 avg_loss = utils.compute_loss(model, x, seqs, target_frame, criterion, compute_grad=True)
 
                 optimizer.step()
@@ -207,7 +207,7 @@ if __name__ == '__main__':
                         help='Dataset path')
     parser.add_argument('--hdf_dir', type=str, default="hdf",
                         help='Dataset path')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/waveunet',
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/waveunet_e4',
                         help='Folder to write checkpoints into')
     parser.add_argument('--load_model', type=str, default=None,
                         help='Reload a previously trained model (whole task model)')

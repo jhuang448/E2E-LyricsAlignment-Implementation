@@ -244,48 +244,82 @@ def alignment(song_pred, lyrics, idx):
     lyrics_int = text2seq(lyrics)
     lyrics_length = len(lyrics_int)
 
-    s = np.zeros((audio_length, lyrics_length))
-    opt = np.zeros((audio_length, lyrics_length))
+    s = np.zeros((audio_length, 2*lyrics_length+1)) - np.Inf
+    opt = np.zeros((audio_length, 2*lyrics_length+1))
 
     blank = 28
 
     # init
-    s[0][0] = song_pred[0][lyrics_int[0]]
+    s[0][0] = song_pred[0][blank]
     # insert eps
     for i in np.arange(1, audio_length):
         s[i][0] = s[i-1][0] + song_pred[i][blank]
-    for j in np.arange(1, lyrics_length):
-        s[j][j] = s[j-1][j-1] + song_pred[j][lyrics_int[j]]
-        opt[j][j] = 1
+
+    for j in np.arange(lyrics_length):
+        if j == 0:
+            s[j+1][2*j+1] = s[j][2*j] + song_pred[j+1][lyrics_int[j]]
+            opt[j+1][2*j+1] = 1  # 45 degree
+        else:
+            s[j+1][2*j+1] = s[j][2*j-1] + song_pred[j+1][lyrics_int[j]]
+            opt[j+1][2*j+1] = 2 # 28 degree
+
+        s[j+2][2*j+2] = s[j+1][2*j+1] + song_pred[j+2][blank]
+        opt[j+2][2*j+2] = 1  # 45 degree
+
 
     for audio_pos in np.arange(2, audio_length):
 
-        for ch_pos in np.arange(1, lyrics_length):
+        for ch_pos in np.arange(1, 2*lyrics_length+1):
 
-            if ch_pos >= audio_pos:
+            if ch_pos % 2 == 1 and (ch_pos+1)/2 >= audio_pos:
+                break
+            if ch_pos % 2 == 0 and ch_pos/2 + 1 >= audio_pos:
                 break
 
-            # insert eps
-            a = s[audio_pos-1][ch_pos] + song_pred[audio_pos][blank]
-            # next ch
-            b = s[audio_pos-1][ch_pos-1] + song_pred[audio_pos][lyrics_int[ch_pos]]
-            if b > a:
-                s[audio_pos][ch_pos] = b
-                opt[audio_pos][ch_pos] = 1
-            else:
-                s[audio_pos][ch_pos] = a
+            if ch_pos % 2 == 1: # ch
+                ch_idx = int((ch_pos-1)/2)
+                # cur ch -> ch
+                a = s[audio_pos-1][ch_pos] + song_pred[audio_pos][lyrics_int[ch_idx]]
+                # last ch -> ch
+                b = s[audio_pos-1][ch_pos-2] + song_pred[audio_pos][lyrics_int[ch_idx]]
+                # eps -> ch
+                c = s[audio_pos-1][ch_pos-1] + song_pred[audio_pos][lyrics_int[ch_idx]]
+                if a > b and a > c:
+                    s[audio_pos][ch_pos] = a
+                    opt[audio_pos][ch_pos] = 0
+                elif b >= a and b >= c:
+                    s[audio_pos][ch_pos] = b
+                    opt[audio_pos][ch_pos] = 2
+                else:
+                    s[audio_pos][ch_pos] = c
+                    opt[audio_pos][ch_pos] = 1
 
-    score = s[audio_length-1][lyrics_length-1]
+            if ch_pos % 2 == 0: # eps
+                # cur ch -> ch
+                a = s[audio_pos-1][ch_pos] + song_pred[audio_pos][blank]
+                # eps -> ch
+                c = s[audio_pos-1][ch_pos-1] + song_pred[audio_pos][blank]
+                if a > c:
+                    s[audio_pos][ch_pos] = a
+                    opt[audio_pos][ch_pos] = 0
+                else:
+                    s[audio_pos][ch_pos] = c
+                    opt[audio_pos][ch_pos] = 1
+
+    score = s[audio_length-1][2*lyrics_length]
 
     # retrive optimal path
     path = []
     x = audio_length-1
-    y = lyrics_length-1
+    y = 2*lyrics_length
     path.append([x, y])
     while x > 0 or y > 0:
         if opt[x][y] == 1:
             x -= 1
             y -= 1
+        elif opt[x][y] == 2:
+            x -= 1
+            y -= 2
         else:
             x -= 1
         path.append([x, y])
@@ -298,10 +332,10 @@ def alignment(song_pred, lyrics, idx):
     while word_i < len(idx):
         # e.g. "happy day"
         # find the first time "h" appears
-        if path[path_i][1] == idx[word_i][0]:
+        if path[path_i][1] == 2*idx[word_i][0]+1:
             st = path[path_i][0]
             # find the first time " " appears after "h"
-            while (path[path_i][1] != idx[word_i][1]):
+            while (path[path_i][1] != 2*idx[word_i][1]+1):
                 path_i += 1
             ed = path[path_i][0]
             # append

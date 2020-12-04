@@ -138,34 +138,33 @@ def predict(args, model, target_frame, test_data, device):
             batch_num, _, output_length = all_outputs.shape
             frame_offset = int((output_length - target_frame) / 2)
 
-            all_outputs = all_outputs[:, :, frame_offset:-frame_offset]
             output_length = all_outputs.shape[2]
 
             all_outputs = all_outputs.transpose(1,2)
             # print(all_outputs.shape) # batch, length, classes
             _, _, num_classes = all_outputs.shape
 
-            plt.matshow(np.exp(all_outputs[2]))
-            plt.savefig('./pics/' + audio_name + '_2.png')
+            # plt.matshow(np.exp(all_outputs[2]))
+            # plt.savefig('./pics/' + audio_name + '_2.png')
 
             song_pred = all_outputs.data.numpy().reshape(-1, num_classes)
             # print(song_pred.shape) # total_length, num_classes
             # total_length = song_pred.shape[0]
 
             # smoothing
-            # P_noise = np.random.uniform(low=1e-11, high=1e-10, size=song_pred.shape)
-            # song_pred = np.log(np.exp(song_pred) + P_noise)
+            P_noise = np.random.uniform(low=1e-11, high=1e-10, size=song_pred.shape)
+            song_pred = np.log(np.exp(song_pred) + P_noise)
 
             # Dynamic programming
-            # word_align, score = utils.alignment(song_pred, words, idx)
-            # print(score)
-            #
-            # resolution = 225501 / output_length / args.sr
-            #
-            # # write
-            # with open(os.path.join(args.pred_dir, audio_name + "_align.csv"), 'w') as f:
-            #     for word in word_align:
-            #         f.write("{},{}\n".format(word[0] * resolution, word[1] * resolution))
+            word_align, score = utils.alignment(song_pred, words, idx)
+            print(score)
+
+            resolution = 225501 / output_length / args.sr
+
+            # write
+            with open(os.path.join(args.pred_dir, audio_name + "_align.csv"), 'w') as f:
+                for word in word_align:
+                    f.write("{},{}\n".format(word[0] * resolution, word[1] * resolution))
 
             pbar.update(1)
 
