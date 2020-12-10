@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import librosa
 import string
+import math
 
 def compute_output(model, inputs):
     '''
@@ -33,7 +34,7 @@ def my_collate(batch):
     seqs = list(seqs)
     return audio, targets, seqs
 
-def compute_loss(model, inputs, targets, target_frame, criterion, compute_grad=False):
+def compute_loss(model, inputs, targets, criterion, compute_grad=False):
     '''
     Computes gradients of model with given inputs and targets and loss function.
     Optionally backpropagates to compute gradients for weights.

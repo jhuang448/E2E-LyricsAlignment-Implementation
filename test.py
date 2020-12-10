@@ -189,7 +189,7 @@ def validate(args, model, target_frame, criterion, val_data, device):
             x = utils.move_data_to_device(x, device)
             seqs = [utils.move_data_to_device(seq, device) for seq in seqs]
 
-            avg_loss = utils.compute_loss(model, x, seqs, target_frame, criterion, compute_grad=False)
+            avg_loss = utils.compute_loss(model, x, seqs, criterion, compute_grad=False)
 
             total_loss += avg_loss
 

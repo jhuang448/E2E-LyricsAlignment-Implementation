@@ -85,7 +85,7 @@ class DownsamplingBlock(nn.Module):
         return curr_size
 
 class WaveunetLyrics(nn.Module):
-    def __init__(self, num_inputs, num_channels, num_outputs, kernel_size, input_size, conv_type, res, depth=1, strides=2):
+    def __init__(self, num_inputs, num_channels, num_outputs, kernel_size, input_sample, output_sample, conv_type, res, depth=1, strides=2):
         '''
 
         :param num_inputs:              number of input channel (1)
@@ -136,12 +136,12 @@ class WaveunetLyrics(nn.Module):
 
         self.waveunets = module
 
-        self.set_output_size(input_size)
+        self.set_output_size(input_sample, output_sample)
 
-    def set_output_size(self, target_output_size):
-        self.target_output_size = target_output_size
+    def set_output_size(self, input_sample, output_sample):
+        self.target_output_size = input_sample
 
-        self.input_size, self.output_size = (352243, 225501) # self.check_padding(220)
+        self.input_size, self.output_size = (input_sample, output_sample) # self.check_padding(220)
         print("Using valid convolutions with " + str(self.input_size) + " inputs and " + str(self.output_size) + " outputs")
 
         assert((self.input_size - self.output_size) % 2 == 0)

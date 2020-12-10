@@ -57,7 +57,7 @@ if __name__ == '__main__':
                         help='Dataset name')
     parser.add_argument('--hdf_dir', type=str, default="hdf",
                         help='Dataset path')
-    parser.add_argument('--pred_dir', type=str, default="predict_smooth",
+    parser.add_argument('--pred_dir', type=str, default="predict",
                         help='prediction path')
     parser.add_argument('--load_model', type=str, default='checkpoints/waveunet/checkpoint_181904',
                         help='Reload a previously trained model (whole task model)')
