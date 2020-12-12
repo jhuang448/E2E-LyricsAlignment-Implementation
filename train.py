@@ -21,7 +21,7 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
 
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
@@ -31,10 +31,10 @@ def main(args):
     up_features = down_features[-args.up_levels:]
 
     model = WaveunetLyrics(num_inputs=args.channels, num_channels=[down_features, up_features], num_outputs=args.num_class,
-                           kernel_size=[15, 5], input_sample=250000, output_sample=123904, depth=args.depth,
+                           kernel_size=[15, 5], input_sample=185000, output_sample=58368, depth=args.depth,
                            strides=args.strides, conv_type=args.conv_type, res=args.res)
 
-    target_frame = int(123904/1024)
+    target_frame = int(58368/1024)
 
     device = 'cuda' if (args.cuda and torch.cuda.is_available()) else 'cpu'
 
@@ -208,7 +208,7 @@ if __name__ == '__main__':
                         help='Dataset path')
     parser.add_argument('--hdf_dir', type=str, default="hdf",
                         help='Dataset path')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/waveunet_small_window',
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/waveunet_smaller',
                         help='Folder to write checkpoints into')
     parser.add_argument('--load_model', type=str, default=None,
                         help='Reload a previously trained model (whole task model)')
@@ -232,8 +232,6 @@ if __name__ == '__main__':
                         help="Number of input audio channels")
     parser.add_argument('--kernel_size', type=int, default=5,
                         help="Filter width of kernels. Has to be an odd number")
-    parser.add_argument('--output_size', type=float, default= 10.22681,
-                        help="Output duration")
     parser.add_argument('--strides', type=int, default=2,
                         help="Strides in Waveunet")
     parser.add_argument('--patience', type=int, default=20,

@@ -212,7 +212,7 @@ class WaveunetLyrics(nn.Module):
             out = block(out, shortcuts[-1 - idx])
             # print(out.shape)
 
-        # print("after downsampling blocks:", out.shape)
+        # print("after upsampling blocks:", out.shape)
 
         # OUTPUT CONV
         out = module.output_conv(out)

@@ -108,7 +108,7 @@ def load_lyrics(lyrics_file):
     full_lyrics = " ".join(full_lyrics.split())
     # remove unknown characters
     full_lyrics = "".join([c for c in full_lyrics.lower() if c in d.keys()])
-    full_lyrics = " " + full_lyrics + " "
+    # full_lyrics = " " + full_lyrics + " "
 
     # split to words
     with open(lyrics_file + '.words.txt', 'r') as f:
@@ -336,7 +336,7 @@ def alignment(song_pred, lyrics, idx):
         if path[path_i][1] == 2*idx[word_i][0]+1:
             st = path[path_i][0]
             # find the first time " " appears after "h"
-            while (path[path_i][1] != 2*idx[word_i][1]+1):
+            while  path_i < len(path)-1 and (path[path_i][1] != 2*idx[word_i][1]+1):
                 path_i += 1
             ed = path[path_i][0]
             # append

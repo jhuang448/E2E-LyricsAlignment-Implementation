@@ -144,8 +144,8 @@ def predict(args, model, target_frame, test_data, device):
             # print(all_outputs.shape) # batch, length, classes
             _, _, num_classes = all_outputs.shape
 
-            # plt.matshow(np.exp(all_outputs[2]))
-            # plt.savefig('./pics/' + audio_name + '_2.png')
+            # plt.matshow(np.exp(all_outputs[9]))
+            # plt.savefig('./pics/' + audio_name + '_9.png')
 
             song_pred = all_outputs.data.numpy().reshape(-1, num_classes)
             # print(song_pred.shape) # total_length, num_classes
@@ -159,7 +159,7 @@ def predict(args, model, target_frame, test_data, device):
             word_align, score = utils.alignment(song_pred, words, idx)
             print(score)
 
-            resolution = 225501 / output_length / args.sr
+            resolution = model.shapes["output_frames"] / output_length / args.sr
 
             # write
             with open(os.path.join(args.pred_dir, audio_name + "_align.csv"), 'w') as f:

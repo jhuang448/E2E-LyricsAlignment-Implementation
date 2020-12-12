@@ -18,10 +18,10 @@ def main(args):
 
     model = WaveunetLyrics(num_inputs=args.channels, num_channels=[down_features, up_features],
                            num_outputs=args.num_class,
-                           kernel_size=[15, 5], input_size=352243, depth=args.depth,
+                           kernel_size=[15, 5], input_sample=250000, output_sample=123904, depth=args.depth,
                            strides=args.strides, conv_type=args.conv_type, res=args.res)
 
-    target_frame = int(225501 / 1024)
+    target_frame = int(123904 / 1024)
 
     device = 'cuda' if (args.cuda and torch.cuda.is_available()) else 'cpu'
 
@@ -57,9 +57,9 @@ if __name__ == '__main__':
                         help='Dataset name')
     parser.add_argument('--hdf_dir', type=str, default="hdf",
                         help='Dataset path')
-    parser.add_argument('--pred_dir', type=str, default="predict",
+    parser.add_argument('--pred_dir', type=str, default="predict_5s",
                         help='prediction path')
-    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet/checkpoint_181904',
+    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet_small_window/checkpoint_best',
                         help='Reload a previously trained model (whole task model)')
     parser.add_argument('--batch_size', type=int, default=1,
                         help="Batch size")
