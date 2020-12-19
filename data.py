@@ -426,7 +426,7 @@ class JamendoLyricsDataset(Dataset):
 
             chunks.append(audio)
 
-        return chunks, align_idx, (lyrics, audio_name)
+        return chunks, align_idx, (lyrics, audio_name, audio_length)
 
     def __len__(self):
-        return self.length;
+        return self.length

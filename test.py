@@ -5,6 +5,8 @@ import utils
 
 import numpy as np
 import torch, os
+import torch.nn as nn
+from model_speech import train_audio_transforms
 
 import time
 from utils import compute_loss
@@ -108,7 +110,7 @@ def predict_song(args, audio_path, model):
 
     return sources
 
-def predict(args, model, target_frame, test_data, device):
+def predict(args, model, test_data, device):
 
     if not os.path.exists(args.pred_dir):
         os.makedirs(args.pred_dir)
@@ -125,9 +127,9 @@ def predict(args, model, target_frame, test_data, device):
     model.eval()
     with tqdm(total=len(test_data) // args.batch_size) as pbar, torch.no_grad():
         for example_num, _data in enumerate(dataloader):
-            x, idx, texts = _data
+            x, idx, meta = _data
             idx = idx[0]
-            words, audio_name = texts[0]
+            words, audio_name, audio_length = meta[0]
 
             x = utils.move_data_to_device(x, device)
             x = x.squeeze(0)
@@ -136,7 +138,6 @@ def predict(args, model, target_frame, test_data, device):
             all_outputs = model(x)
 
             batch_num, _, output_length = all_outputs.shape
-            frame_offset = int((output_length - target_frame) / 2)
 
             output_length = all_outputs.shape[2]
 
@@ -149,7 +150,12 @@ def predict(args, model, target_frame, test_data, device):
 
             song_pred = all_outputs.data.numpy().reshape(-1, num_classes)
             # print(song_pred.shape) # total_length, num_classes
-            # total_length = song_pred.shape[0]
+
+            resolution = model.shapes["output_frames"] / output_length / args.sr
+            total_length = int(audio_length / args.sr // resolution)
+
+            song_pred = song_pred[:total_length, :]
+            # print(song_pred.shape)  # total_length, num_classes
 
             # smoothing
             P_noise = np.random.uniform(low=1e-11, high=1e-10, size=song_pred.shape)
@@ -157,9 +163,7 @@ def predict(args, model, target_frame, test_data, device):
 
             # Dynamic programming
             word_align, score = utils.alignment(song_pred, words, idx)
-            print(score)
-
-            resolution = model.shapes["output_frames"] / output_length / args.sr
+            print("\t{}:\t{}".format(audio_name, score))
 
             # write
             with open(os.path.join(args.pred_dir, audio_name + "_align.csv"), 'w') as f:
@@ -169,7 +173,6 @@ def predict(args, model, target_frame, test_data, device):
             pbar.update(1)
 
     return -1
-
 
 def validate(args, model, target_frame, criterion, val_data, device):
     # PREPARE DATA

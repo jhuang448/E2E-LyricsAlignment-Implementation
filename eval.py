@@ -1,7 +1,4 @@
-from tqdm import tqdm
-
 import os, argparse
-from test import predict
 
 import torch
 
@@ -39,7 +36,7 @@ def main(args):
 
     test_data = JamendoLyricsDataset(args.sr, model.shapes, args.hdf_dir, args.dataset, args.audio_dir)
 
-    results = test.predict(args, model, target_frame, test_data, device)
+    results = test.predict(args, model, test_data, device)
 
 
 if __name__ == '__main__':
@@ -59,7 +56,7 @@ if __name__ == '__main__':
                         help='Dataset path')
     parser.add_argument('--pred_dir', type=str, default="predict_5s",
                         help='prediction path')
-    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet_small_window/checkpoint_best',
+    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet_5s/checkpoint_best',
                         help='Reload a previously trained model (whole task model)')
     parser.add_argument('--batch_size', type=int, default=1,
                         help="Batch size")
@@ -75,8 +72,6 @@ if __name__ == '__main__':
                         help="Number of input audio channels")
     parser.add_argument('--kernel_size', type=int, default=5,
                         help="Filter width of kernels. Has to be an odd number")
-    parser.add_argument('--output_size', type=float, default=10.22681,
-                        help="Output duration")
     parser.add_argument('--strides', type=int, default=2,
                         help="Strides in Waveunet")
     parser.add_argument('--conv_type', type=str, default="gn",
