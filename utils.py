@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import librosa
 import string
-import math
+import warnings
 
 def compute_output(model, inputs):
     '''
@@ -80,7 +80,23 @@ def compute_loss(model, inputs, targets, criterion, compute_grad=False):
 def worker_init_fn(worker_id): # This is apparently needed to ensure workers have different random seeds and draw different examples!
     np.random.seed(np.random.get_state()[1][0] + worker_id)
 
+def load_example(example, sr=22050, mono=True, mode="numpy", offset=0.0, duration=None):
+    if example["vocals"] == None or example["accompaniment"] == None:
+        # load original
+        y, curr_sr = load(example["path"], sr, mono, mode, offset, duration)
+    else:
+        # load vocals and accompaniment
+        y_v, curr_sr = load(example["vocals"], sr, mono, mode, offset, duration)
+        y_a, curr_sr = load(example["accompaniment"], sr, mono, mode, offset, duration)
+
+        assert(y_a.shape[1] == y_v.shape[1])
+        y = np.concatenate((y_v, y_a), axis=0)
+
+    return y, curr_sr
+
 def load(path, sr=22050, mono=True, mode="numpy", offset=0.0, duration=None):
+    # with warnings.catch_warnings():
+    #     warnings.simplefilter("ignore")
     y, curr_sr = librosa.load(path, sr=sr, mono=mono, res_type='kaiser_fast', offset=offset, duration=duration)
 
     if len(y.shape) == 1:
@@ -130,6 +146,50 @@ def load_lyrics(lyrics_file):
 
     return full_lyrics, words_lines, idx
 
+def random_mute(lyrics_len, mute_prob):
+    r = np.random.random_sample(size=(lyrics_len,))
+    mute = (r > mute_prob)
+    return mute
+
+def generate_envelope(audio_len, times_list, mute):
+    fade_max = 0.1 * 22050
+
+    env = np.ones(shape=(audio_len,), dtype=np.float)
+
+    last_unmute_end = 0
+    i = 0
+    while i < len(mute):
+        mute_i = mute[i]
+        if mute_i == False:
+            # first unmuted word after silence
+            unmuted_start = np.int(times_list[i, 0])
+            env[last_unmute_end:unmuted_start] = 0
+
+            # skip unmuted segs
+            while i < len(mute) and mute[i] == False:
+                last_unmute_end = np.int(times_list[i, 1])
+                i += 1
+                continue
+        else:
+            # skip muted segs
+            while i < len(mute) and mute[i] == True:
+                i += 1
+                continue
+    env[last_unmute_end:] = 0
+
+    return env
+
+
+def mix_vocal_accompaniment(audio, lyrics_list, times_list, mute_prob):
+
+    mute = random_mute(len(lyrics_list), mute_prob)
+    env = generate_envelope(audio.shape[1], times_list, mute)
+
+    mix = audio[0, :] * env + audio[1, :]
+
+    lyrics_unmute = np.array(lyrics_list)[~mute]
+
+    return mix, list(lyrics_unmute)
 
 def write_wav(path, audio, sr):
     soundfile.write(path, audio.T, sr, "PCM_16")

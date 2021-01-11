@@ -9,14 +9,12 @@ import string
 
 from tqdm import tqdm
 import DALI as dali_code
-from utils import load, write_wav, load_lyrics
-
-import soundfile as sf
+from utils import load_example, load, write_wav, load_lyrics, mix_vocal_accompaniment
 
 import logging
 # logging.basicConfig(level=logging.DEBUG)
 
-def getDALI(database_path, level, lang, genre):
+def getDALI(database_path, level, lang, genre, sepa_audio_path=None):
     dali_annot_path = os.path.join(database_path, 'annot_tismir')
     dali_audio_path = os.path.join(database_path, 'audio')
     dali_data = dali_code.get_the_DALI_dataset(dali_annot_path, skip=[], keep=[])
@@ -44,6 +42,18 @@ def getDALI(database_path, level, lang, genre):
                     continue
 
                 song = {"id": file[:-4], "annot": [], "path": os.path.join(dali_audio_path, file)}
+
+                # add separated paths
+                if sepa_audio_path is not None:
+                    song["vocals"] = os.path.join(sepa_audio_path, file[:-4] + "_vocals.mp3")
+                    song["accompaniment"] = os.path.join(sepa_audio_path, file[:-4] + "_accompaniment.mp3")
+
+                    if os.path.exists(song["vocals"]) == False or os.path.exists(song["accompaniment"]) == False:
+                        # problematic files (failed at source separation for some reason)
+                        print("Separated files not found.", song)
+                        song["vocals"] = None
+                        song["accompaniment"] = None
+
                 samples = entry.annotations['annot'][level]
                 subset.append(song)
 
@@ -51,7 +61,7 @@ def getDALI(database_path, level, lang, genre):
                     sample["duration"] = sample["time"][1] - sample["time"][0]
 
                     if sample["duration"] > 10.22:
-                        print(sample)
+                        # print(sample)
                         discard_line_num += 1
 
                     song["annot"].append(sample)
@@ -59,7 +69,7 @@ def getDALI(database_path, level, lang, genre):
 
                     total_line_num += 1
 
-                logging.debug("Successfully loaded {} songs".format(len(subset)))
+                # logging.debug("Successfully loaded {} songs".format(len(subset)))
             except:
                 logging.warning("Error loading annotation for song {}".format(file))
                 pass
@@ -69,14 +79,17 @@ def getDALI(database_path, level, lang, genre):
 
     return np.array(subset, dtype=object)
 
-def get_dali_folds(database_path, level, lang="english", genre=None):
-    dataset = getDALI(database_path, level, lang, genre)
+def get_dali_folds(database_path, level, lang="english", genre=None, sepa_audio_path=None):
+    dataset = getDALI(database_path, level, lang, genre, sepa_audio_path)
 
     total_len = len(dataset)
     train_len = np.int(0.8 * total_len)
 
     train_list = np.random.choice(dataset, train_len, replace=False)
+    # test random seed
+    print(train_list[0]["id"], train_list[1]["id"], train_list[2]["id"])
     val_list = [elem for elem in dataset if elem not in train_list]
+
     logging.debug("First training song: " + str(train_list[0]["id"]) + " " + str(len(train_list[0]["annot"])) + " lines")
     logging.debug("train_list {} songs val_list {} songs".format(len(train_list), len(val_list)))
     return {"train" : train_list, "val" : val_list}
@@ -113,7 +126,8 @@ def random_amplify(mix, targets, shapes, min, max):
     return crop(mix, targets, shapes)
 
 class LyricsAlignDataset(IterableDataset):
-    def __init__(self, dataset, partition, sr, shapes, hdf_dir, in_memory=False, dummy=False, pad_length=150):
+    def __init__(self, dataset, partition, sr, shapes, hdf_dir,
+                 in_memory=False, sepa=False, dummy=False, mute_prob=0.8):
         '''
 
         :param dataset:     a list of song with line level annotation
@@ -127,6 +141,7 @@ class LyricsAlignDataset(IterableDataset):
         super(LyricsAlignDataset, self).__init__()
 
         self.hdf_dataset = None
+        hdf_dir = os.path.join(hdf_dir, "sepa={}".format(sepa))
         os.makedirs(hdf_dir, exist_ok=True)
         if dummy == False:
             self.hdf_file = os.path.join(hdf_dir, partition + ".hdf5")
@@ -137,7 +152,8 @@ class LyricsAlignDataset(IterableDataset):
         self.shapes = shapes
         self.hop = (shapes["output_frames"] // 2)
         self.in_memory = in_memory
-        self.pad_length = pad_length
+        self.sepa = sepa
+        self.mute_prob = mute_prob
 
         # PREPARE HDF FILE
 
@@ -153,8 +169,12 @@ class LyricsAlignDataset(IterableDataset):
 
                 print("Adding audio files to dataset (preprocessing)...")
                 for idx, example in enumerate(tqdm(dataset[partition])):
+
                     # Load song
-                    y, _ = load(example["path"], sr=self.sr, mono=True)
+                    if sepa:
+                        y, _ = load_example(example, sr=self.sr, mono=True)
+                    else:
+                        y, _ = load(example["path"], sr=self.sr, mono=True)
 
                     # Add to HDF5 file
                     grp = f.create_group(str(idx))
@@ -205,7 +225,6 @@ class LyricsAlignDataset(IterableDataset):
             driver = "core" if self.in_memory else None  # Load HDF5 fully into memory if desired
             self.hdf_dataset = h5py.File(self.hdf_file, 'r', driver=driver)
 
-
         while True:
             for i in np.arange(self.length):
 
@@ -245,11 +264,6 @@ class LyricsAlignDataset(IterableDataset):
                 else:
                     pad_back = 0
 
-                # read audio and zero padding
-                audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
-                if pad_front > 0 or pad_back > 0:
-                    audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
-
                 # find the lyrics within (start_target_pos, end_target_pos)
                 words_start_end_pos = self.hdf_dataset[str(song_idx)]["times"][:]
                 try:
@@ -259,7 +273,7 @@ class LyricsAlignDataset(IterableDataset):
                     first_word_to_include = np.Inf
 
                 try:
-                    last_word_to_include = annot_num - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
+                    last_word_to_include = annot_num - 1 - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
                                                  if val < end_target_pos/self.sr)
                 except StopIteration:
                     last_word_to_include = -np.Inf
@@ -269,9 +283,23 @@ class LyricsAlignDataset(IterableDataset):
                     # invalid sample, skip
                     targets = None
                     continue
+
                 if first_word_to_include <= last_word_to_include: # the window covers word[first:last+1]
                     lyrics = self.hdf_dataset[str(song_idx)]["lyrics"][first_word_to_include:last_word_to_include+1]
                     lyrics_list = [s[0].decode() for s in list(lyrics)]
+                    times_list = self.hdf_dataset[str(song_idx)]["times"][first_word_to_include:last_word_to_include+1, :]* self.sr - start_pos
+
+                    # read audio and zero padding
+                    audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
+
+                    if self.sepa:
+                        write_wav("test_before.wav", audio, self.sr)
+                        audio, lyrics_list = mix_vocal_accompaniment(audio, lyrics_list, times_list, self.mute_prob)
+                        write_wav("test_mix.wav", audio, self.sr)
+
+                    if pad_front > 0 or pad_back > 0:
+                        audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
+
                     targets = " ".join(lyrics_list)
                     targets = " ".join(targets.split())
 
@@ -301,6 +329,13 @@ class LyricsAlignDataset(IterableDataset):
             seq.append(idx)
         if len(seq) == 0:
             seq.append(27)
+
+        # add spaces at the beginning and the end
+        if seq[0] != 27:
+            seq.insert(0, 27)
+        if seq[-1] != 27:
+            seq.append(27)
+
         return np.array(seq)
 
 
