@@ -21,10 +21,10 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 def main(args):
-    #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
+    torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
 
     # MODEL
     down_features = [args.features*i for i in range(1, args.down_levels+2)] # [args.features*2**i for i in range(0, args.down_levels+1)]
@@ -171,12 +171,12 @@ if __name__ == '__main__':
                         help='Use CUDA (default: False)')
     parser.add_argument('--dummy', action='store_true',
                         help='Use dummy train/val sets (default: False)')
-    parser.add_argument('--num_workers', type=int, default=1,
+    parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of data loader worker threads (default: 1)')
     parser.add_argument('--features', type=int, default=24,
                         help='Number of feature channels per layer')
-    parser.add_argument('--log_dir', type=str, default='logs/waveunet',
-                        help='Folder to write logs into')
+    parser.add_argument('--log_dir', type=str, required=True,
+                        help='Folder prefix to write logs into, e.g. logs/waveunet')
     parser.add_argument('--dataset_dir', type=str, default="/import/c4dm-datasets/DALI_v2.0/",
                         help='Dataset path')
     parser.add_argument('--sepa', action='store_true',
@@ -184,9 +184,9 @@ if __name__ == '__main__':
     parser.add_argument('--sepa_dir', type=str, default="/import/c4dm-datasets/sepa_DALI/audio/",
                         help='Dataset path')
     parser.add_argument('--hdf_dir', type=str, default="/import/c4dm-datasets/sepa_DALI/hdf/",
-                        help='Dataset path')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/waveunet_sepa/',
-                        help='Folder to write checkpoints into')
+                        help='HDF5 file path')
+    parser.add_argument('--checkpoint_dir', type=str, required=True,
+                        help='Folder to write checkpoints into, e.g. checkpoints/waveunet/')
     parser.add_argument('--load_model', type=str, default=None,
                         help='Reload a previously trained model (whole task model)')
     parser.add_argument('--lr', type=float, default=1e-4,
@@ -195,8 +195,8 @@ if __name__ == '__main__':
                         help='Minimum learning rate in LR cycle (default: 5e-5)')
     parser.add_argument('--cycles', type=int, default=2,
                         help='Number of LR cycles per epoch')
-    parser.add_argument('--batch_size', type=int, default=8,
-                        help="Batch size")
+    parser.add_argument('--batch_size', type=int, required=True,
+                        help="Batch size, e.g. 16, 32...")
     parser.add_argument('--down_levels', type=int, default=12,
                         help="Number of DS blocks")
     parser.add_argument('--up_levels', type=int, default=2,

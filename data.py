@@ -264,6 +264,9 @@ class LyricsAlignDataset(IterableDataset):
                 else:
                     pad_back = 0
 
+                # read audio and zero padding
+                audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
+
                 # find the lyrics within (start_target_pos, end_target_pos)
                 words_start_end_pos = self.hdf_dataset[str(song_idx)]["times"][:]
                 try:
@@ -289,19 +292,18 @@ class LyricsAlignDataset(IterableDataset):
                     lyrics_list = [s[0].decode() for s in list(lyrics)]
                     times_list = self.hdf_dataset[str(song_idx)]["times"][first_word_to_include:last_word_to_include+1, :]* self.sr - start_pos
 
-                    # read audio and zero padding
-                    audio = self.hdf_dataset[str(song_idx)]["inputs"][:, start_pos:end_pos].astype(np.float32)
-
-                    if self.sepa:
-                        write_wav("test_before.wav", audio, self.sr)
+                    if self.sepa and audio.shape[0] > 1:
+                        # write_wav("test_before.wav", audio, self.sr)
                         audio, lyrics_list = mix_vocal_accompaniment(audio, lyrics_list, times_list, self.mute_prob)
-                        write_wav("test_mix.wav", audio, self.sr)
-
-                    if pad_front > 0 or pad_back > 0:
-                        audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
+                        # write_wav("test_mix.wav", audio, self.sr)
 
                     targets = " ".join(lyrics_list)
                     targets = " ".join(targets.split())
+
+                if audio.shape[0] > 1:
+                    audio = np.sum(audio, axis=0, keepdims=True)
+                if pad_front > 0 or pad_back > 0:
+                    audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
 
                 if len(targets) > 120:
                     continue

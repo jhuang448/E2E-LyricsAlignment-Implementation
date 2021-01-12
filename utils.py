@@ -189,7 +189,7 @@ def mix_vocal_accompaniment(audio, lyrics_list, times_list, mute_prob):
 
     lyrics_unmute = np.array(lyrics_list)[~mute]
 
-    return mix, list(lyrics_unmute)
+    return np.expand_dims(mix, axis=0), list(lyrics_unmute)
 
 def write_wav(path, audio, sr):
     soundfile.write(path, audio.T, sr, "PCM_16")
