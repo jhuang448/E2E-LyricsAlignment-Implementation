@@ -127,7 +127,7 @@ def random_amplify(mix, targets, shapes, min, max):
 
 class LyricsAlignDataset(IterableDataset):
     def __init__(self, dataset, partition, sr, shapes, hdf_dir,
-                 in_memory=False, sepa=False, dummy=False, mute_prob=0.8):
+                 in_memory=False, sepa=False, dummy=False, mute_prob=0.8, aug=False):
         '''
 
         :param dataset:     a list of song with line level annotation
@@ -152,8 +152,12 @@ class LyricsAlignDataset(IterableDataset):
         self.shapes = shapes
         self.hop = (shapes["output_frames"] // 2)
         self.in_memory = in_memory
+        self.aug = aug
         self.sepa = sepa
         self.mute_prob = mute_prob
+
+        if aug:
+            assert(sepa == True)
 
         # PREPARE HDF FILE
 
@@ -210,7 +214,12 @@ class LyricsAlignDataset(IterableDataset):
             lengths = [( (l - self.shapes["output_frames"]) // self.hop) + 1 for l in lengths]
 
         self.start_pos = SortedList(np.cumsum(lengths))
-        self.length = self.start_pos[-1]
+        self.length_base = self.start_pos[-1]
+
+        if self.aug:
+            self.length = self.length_base * 2 # add augmented data
+        else:
+            self.length = self.length_base
 
         self.shuffled_buffer = np.arange(self.length)
         self.shuffle_data_list()
@@ -230,6 +239,9 @@ class LyricsAlignDataset(IterableDataset):
 
                 # index = np.random.randint(self.length)
                 index = self.shuffled_buffer[i]
+
+                sepa_flag = (self.aug == False and self.sepa) or (index >= self.length_base)
+                index = index % self.length_base
 
                 # Find out which slice of targets we want to read
                 song_idx = self.start_pos.bisect_right(index)
@@ -294,7 +306,7 @@ class LyricsAlignDataset(IterableDataset):
                     lyrics_list = [s[0].decode() for s in list(lyrics)]
                     times_list = self.hdf_dataset[str(song_idx)]["times"][first_word_to_include:last_word_to_include+1, :]* self.sr - start_pos
 
-                    if self.sepa and audio.shape[0] > 1:
+                    if sepa_flag and audio.shape[0] > 1:
                         audio, lyrics_list = mix_vocal_accompaniment(audio, lyrics_list, times_list, self.mute_prob)
                         # write_wav("{}_{}_after.wav".format(str(song_idx), str(index)), audio, self.sr)
 
@@ -309,7 +321,7 @@ class LyricsAlignDataset(IterableDataset):
                 if len(targets) > 120:
                     continue
 
-                seq = self.text2seq(targets, insert_space=self.sepa)
+                seq = self.text2seq(targets, insert_space=sepa_flag)
 
                 # print(len(seq), targets)
                 # write_wav("{}_{}.wav".format(str(song_idx), str(index)), audio, 22050)

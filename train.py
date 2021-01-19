@@ -21,7 +21,7 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 def main(args):
     # torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
@@ -58,7 +58,7 @@ def main(args):
     # crop_func = partial(crop, shapes=model.shapes)
 
     val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, sepa=False, dummy=args.dummy)
-    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, sepa=args.sepa, dummy=args.dummy)
+    train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, sepa=True, dummy=args.dummy, aug=True)
 
     print("dummy?", args.dummy, len(train_data), len(val_data))
 
