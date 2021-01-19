@@ -287,15 +287,16 @@ class LyricsAlignDataset(IterableDataset):
                     targets = None
                     continue
 
+                # write_wav("{}_{}_before.wav".format(str(song_idx), str(index)), audio, self.sr)
+
                 if first_word_to_include <= last_word_to_include: # the window covers word[first:last+1]
                     lyrics = self.hdf_dataset[str(song_idx)]["lyrics"][first_word_to_include:last_word_to_include+1]
                     lyrics_list = [s[0].decode() for s in list(lyrics)]
                     times_list = self.hdf_dataset[str(song_idx)]["times"][first_word_to_include:last_word_to_include+1, :]* self.sr - start_pos
 
                     if self.sepa and audio.shape[0] > 1:
-                        # write_wav("test_before.wav", audio, self.sr)
                         audio, lyrics_list = mix_vocal_accompaniment(audio, lyrics_list, times_list, self.mute_prob)
-                        # write_wav("test_mix.wav", audio, self.sr)
+                        # write_wav("{}_{}_after.wav".format(str(song_idx), str(index)), audio, self.sr)
 
                     targets = " ".join(lyrics_list)
                     targets = " ".join(targets.split())
@@ -308,16 +309,16 @@ class LyricsAlignDataset(IterableDataset):
                 if len(targets) > 120:
                     continue
 
-                seq = self.text2seq(targets)
+                seq = self.text2seq(targets, insert_space=self.sepa)
 
-                # print(len(seq))
-                # sf.write("{}_{}.wav".format(str(song_idx), str(index)), audio.T, 22050)
+                # print(len(seq), targets)
+                # write_wav("{}_{}.wav".format(str(song_idx), str(index)), audio, 22050)
 
                 yield audio, targets, seq
 
             self.shuffle_data_list()
 
-    def text2seq(self, text):
+    def text2seq(self, text, insert_space=False):
         seq = []
         for c in text.lower():
             idx = string.ascii_lowercase.find(c)
@@ -333,10 +334,11 @@ class LyricsAlignDataset(IterableDataset):
             seq.append(27)
 
         # add spaces at the beginning and the end
-        if seq[0] != 27:
-            seq.insert(0, 27)
-        if seq[-1] != 27:
-            seq.append(27)
+        if insert_space:
+            if seq[0] != 27:
+                seq.insert(0, 27)
+            if seq[-1] != 27:
+                seq.append(27)
 
         return np.array(seq)
 

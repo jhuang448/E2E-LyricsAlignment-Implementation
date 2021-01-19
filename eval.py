@@ -52,11 +52,11 @@ if __name__ == '__main__':
                         help='Dataset path')
     parser.add_argument('--dataset', type=str, default="jamendo",
                         help='Dataset name')
-    parser.add_argument('--hdf_dir', type=str, default="hdf",
+    parser.add_argument('--hdf_dir', type=str, default="/import/c4dm-datasets/sepa_DALI/hdf/",
                         help='Dataset path')
-    parser.add_argument('--pred_dir', type=str, default="predict_5s",
+    parser.add_argument('--pred_dir', type=str, required=True,
                         help='prediction path')
-    parser.add_argument('--load_model', type=str, default='checkpoints/waveunet_5s/checkpoint_best',
+    parser.add_argument('--load_model', type=str, required=True,
                         help='Reload a previously trained model (whole task model)')
     parser.add_argument('--batch_size', type=int, default=1,
                         help="Batch size")

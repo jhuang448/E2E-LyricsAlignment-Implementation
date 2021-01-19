@@ -21,10 +21,10 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 def main(args):
-    # torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
+    torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
 
     # MODEL
     down_features = [args.features*i for i in range(1, args.down_levels+2)] # [args.features*2**i for i in range(0, args.down_levels+1)]
@@ -48,7 +48,7 @@ def main(args):
 
     import datetime
     current = datetime.datetime.now()
-    writer = SummaryWriter(args.log_dir + current.strftime("%m:%d:%H:%M"))
+    writer = SummaryWriter(args.log_dir + '_valonly_' + current.strftime("%m:%d:%H:%M"))
 
     ### DATASET
     # dali_split = get_dali_folds(args.dataset_dir, level="words", sepa_audio_path=args.sepa_dir)
@@ -57,7 +57,7 @@ def main(args):
     # If not data augmentation, at least crop targets to fit model output shape
     # crop_func = partial(crop, shapes=model.shapes)
 
-    val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, sepa=False, dummy=args.dummy)
+    val_data = LyricsAlignDataset(dali_split, "val", args.sr, model.shapes, args.hdf_dir, sepa=True, dummy=args.dummy, mute_prob=1.)
     train_data = LyricsAlignDataset(dali_split, "train", args.sr, model.shapes, args.hdf_dir, sepa=args.sepa, dummy=args.dummy)
 
     print("dummy?", args.dummy, len(train_data), len(val_data))
@@ -83,84 +83,17 @@ def main(args):
              "epochs" : 0,
              "best_loss" : np.Inf}
 
-    # LOAD MODEL CHECKPOINT IF DESIRED
-    if args.load_model is not None:
-        print("Continuing training full model from checkpoint " + str(args.load_model))
-        state = utils.load_model(model, optimizer, args.load_model, args.cuda)
-
     print('TRAINING START')
-    while state["worse_epochs"] < args.patience:
-        print("Training one epoch from epoch " + str(state["epochs"]))
-        avg_time = 0.
-        model.train()
-        train_loss = 0.
-        with tqdm(total=len(train_data) // args.batch_size) as pbar:
+    for step in np.arange(10501, 10501*16, 10501):
+        print("Loading from epoch " + str(step))
 
-            for example_num, _data in enumerate(dataloader):
-
-                x,  targets, seqs = _data
-
-                x = utils.move_data_to_device(x, device)
-                seqs = [utils.move_data_to_device(seq, device) for seq in seqs]
-
-                t = time.time()
-
-                # Set LR for this iteration
-                # utils.set_cyclic_lr(optimizer, example_num, len(train_data) // args.batch_size, args.cycles, args.min_lr, args.lr)
-                # utils.update_lr(optimizer, state["epochs"], 1, args.lr)
-
-                writer.add_scalar("lr", utils.get_lr(optimizer), state["step"])
-                # print(utils.get_lr(optimizer))
-
-                # Compute loss for each instrument/model
-                optimizer.zero_grad()
-                model.zero_grad()
-
-                avg_loss = utils.compute_loss(model, x, seqs, criterion, compute_grad=True)
-
-                optimizer.step()
-
-                state["step"] += 1
-
-                t = time.time() - t
-                avg_time += (1. / float(example_num + 1)) * (t - avg_time)
-
-                writer.add_scalar("train/step_loss", avg_loss, state["step"])
-
-                # print(avg_loss)
-                train_loss += avg_loss
-
-                pbar.set_description("Current loss: {:.4f}".format(avg_loss))
-                pbar.update(1)
-
-                if example_num == len(train_data) // args.batch_size:
-                    break
-
-        train_loss /= (len(train_data) // args.batch_size)
-        print("Train Loss: {:.4f}".format(train_loss))
-        writer.add_scalar("train/epoch_loss", train_loss, state["epochs"])
+        state = utils.load_model(model, optimizer, "{}_{}".format(args.load_model, step), args.cuda)
 
         # VALIDATE
         val_loss = validate(args, model, target_frame, criterion, val_data, device)
         val_loss /= (len(val_data) // args.batch_size)
         print("VALIDATION FINISHED: LOSS: " + str(val_loss))
         writer.add_scalar("val/loss", val_loss, state["epochs"])
-
-        # EARLY STOPPING CHECK
-        checkpoint_path = os.path.join(args.checkpoint_dir, "checkpoint_" + str(state["step"]))
-        if val_loss >= state["best_loss"]:
-            state["worse_epochs"] += 1
-        else:
-            print("MODEL IMPROVED ON VALIDATION SET!")
-            state["worse_epochs"] = 0
-            state["best_loss"] = val_loss
-            state["best_checkpoint"] = checkpoint_path
-
-        state["epochs"] += 1
-
-        # CHECKPOINT
-        print("Saving model...")
-        utils.save_model(model, optimizer, state, checkpoint_path)
 
     writer.close()
 
@@ -185,8 +118,6 @@ if __name__ == '__main__':
                         help='Dataset path')
     parser.add_argument('--hdf_dir', type=str, default="/import/c4dm-datasets/sepa_DALI/hdf/",
                         help='HDF5 file path')
-    parser.add_argument('--checkpoint_dir', type=str, required=True,
-                        help='Folder to write checkpoints into, e.g. checkpoints/waveunet/')
     parser.add_argument('--load_model', type=str, default=None,
                         help='Reload a previously trained model (whole task model)')
     parser.add_argument('--lr', type=float, default=1e-4,
