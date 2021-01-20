@@ -52,7 +52,7 @@ if __name__ == '__main__':
                         help='Dataset path')
     parser.add_argument('--dataset', type=str, default="jamendo",
                         help='Dataset name')
-    parser.add_argument('--hdf_dir', type=str, default="hdf",
+    parser.add_argument('--hdf_dir', type=str, default="/import/c4dm-datasets/sepa_DALI/hdf/",
                         help='Dataset path')
     parser.add_argument('--pred_dir', type=str, default="predict_5s",
                         help='prediction path')
