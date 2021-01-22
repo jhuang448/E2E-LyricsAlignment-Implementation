@@ -11,6 +11,7 @@ import numpy as np
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data.sampler import RandomSampler, SequentialSampler
 from torch.optim import Adam
 from tqdm import tqdm
 
@@ -21,7 +22,7 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 def main(args):
     #torch.backends.cudnn.benchmark=True # This makes dilated conv much faster for CuDNN 7.5
@@ -48,7 +49,7 @@ def main(args):
 
     import datetime
     current = datetime.datetime.now()
-    writer = SummaryWriter(args.log_dir + current.strftime("%m:%d:%H:%M"))
+    # writer = SummaryWriter(args.log_dir + current.strftime("%m:%d:%H:%M"))
 
     ### DATASET
     # dali_split = get_dali_folds(args.dataset_dir, level="words")
@@ -63,7 +64,7 @@ def main(args):
     print("dummy?", args.dummy, len(train_data), len(val_data))
 
     dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers,
-                                             worker_init_fn=utils.worker_init_fn,
+                                             worker_init_fn=utils.worker_init_fn, sampler=RandomSampler(data_source=train_data),
                                              collate_fn=utils.my_collate)
 
     ##### TRAINING ####
@@ -109,7 +110,7 @@ def main(args):
                 # utils.set_cyclic_lr(optimizer, example_num, len(train_data) // args.batch_size, args.cycles, args.min_lr, args.lr)
                 # utils.update_lr(optimizer, state["epochs"], 1, args.lr)
 
-                writer.add_scalar("lr", utils.get_lr(optimizer), state["step"])
+                # writer.add_scalar("lr", utils.get_lr(optimizer), state["step"])
                 # print(utils.get_lr(optimizer))
 
                 # Compute loss for each instrument/model
@@ -125,7 +126,7 @@ def main(args):
                 t = time.time() - t
                 avg_time += (1. / float(example_num + 1)) * (t - avg_time)
 
-                writer.add_scalar("train/step_loss", avg_loss, state["step"])
+                # writer.add_scalar("train/step_loss", avg_loss, state["step"])
 
                 # print(avg_loss)
                 train_loss += avg_loss
@@ -138,13 +139,13 @@ def main(args):
 
         train_loss /= (len(train_data) // args.batch_size)
         print("Train Loss: {:.4f}".format(train_loss))
-        writer.add_scalar("train/epoch_loss", train_loss, state["epochs"])
+        # writer.add_scalar("train/epoch_loss", train_loss, state["epochs"])
 
         # VALIDATE
         val_loss = validate(args, model, target_frame, criterion, val_data, device)
         val_loss /= (len(val_data) // args.batch_size)
         print("VALIDATION FINISHED: LOSS: " + str(val_loss))
-        writer.add_scalar("val/loss", val_loss, state["epochs"])
+        # writer.add_scalar("val/loss", val_loss, state["epochs"])
 
         # EARLY STOPPING CHECK
         checkpoint_path = os.path.join(args.checkpoint_dir, "checkpoint_" + str(state["step"]))
@@ -158,11 +159,11 @@ def main(args):
 
         # CHECKPOINT
         print("Saving model...")
-        utils.save_model(model, optimizer, state, checkpoint_path)
+        # utils.save_model(model, optimizer, state, checkpoint_path)
 
         state["epochs"] += 1
 
-    writer.close()
+    # writer.close()
 
 if __name__ == '__main__':
     ## TRAIN PARAMETERS
@@ -175,13 +176,13 @@ if __name__ == '__main__':
                         help='Number of data loader worker threads (default: 1)')
     parser.add_argument('--features', type=int, default=24,
                         help='Number of feature channels per layer')
-    parser.add_argument('--log_dir', type=str, default='logs/waveunet_rollback',
+    parser.add_argument('--log_dir', type=str, default='logs/rollback_worker1',
                         help='Folder to write logs into')
     parser.add_argument('--dataset_dir', type=str, default="/import/c4dm-datasets/DALI_v2.0/",
                         help='Dataset path')
     parser.add_argument('--hdf_dir', type=str, default="/import/c4dm-datasets/sepa_DALI/hdf/sepa=False/",
                         help='Dataset path')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/waveunet_rollback',
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/rollback_worker1',
                         help='Folder to write checkpoints into')
     parser.add_argument('--load_model', type=str, default=None,
                         help='Reload a previously trained model (whole task model)')
