@@ -139,7 +139,6 @@ class WaveunetLyrics(nn.Module):
         self.set_output_size(input_sample, output_sample)
 
     def set_output_size(self, input_sample, output_sample):
-        self.target_output_size = input_sample
 
         self.input_size, self.output_size = (input_sample, output_sample) # self.check_padding(220)
         print("Using valid convolutions with " + str(self.input_size) + " inputs and " + str(self.output_size) + " outputs")
@@ -149,36 +148,6 @@ class WaveunetLyrics(nn.Module):
                        "output_end_frame" : (self.input_size - self.output_size) // 2 + self.output_size,
                        "output_frames" : self.output_size,
                        "input_frames" : self.input_size}
-
-    def check_padding(self, target_output_size):
-        # Ensure number of outputs covers a whole number of cycles so each output in the cycle is weighted equally during training
-        bottleneck = 1
-
-        while True:
-            out = self.check_padding_for_bottleneck(bottleneck, target_output_size)
-            if out is not False:
-                return out
-            bottleneck += 1
-
-    def check_padding_for_bottleneck(self, bottleneck, target_output_size):
-        module = self.waveunets
-        try:
-            curr_size = bottleneck
-            for idx, block in enumerate(module.upsampling_blocks):
-                curr_size = block.get_output_size(curr_size)
-            output_size = curr_size
-
-            # Bottleneck-Conv
-            curr_size = bottleneck
-            for block in reversed(module.bottlenecks):
-                curr_size = block.get_input_size(curr_size)
-            for idx, block in enumerate(reversed(module.downsampling_blocks)):
-                curr_size = block.get_input_size(curr_size)
-
-            assert(output_size >= target_output_size)
-            return curr_size, output_size
-        except AssertionError as e:
-            return False
 
     def forward_module(self, x, module):
         '''

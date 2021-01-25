@@ -11,6 +11,7 @@ import numpy as np
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data.sampler import RandomSampler, SequentialSampler
 from torch.optim import Adam
 from tqdm import tqdm
 
@@ -21,6 +22,7 @@ from test import predict, validate
 from waveunet import WaveunetLyrics
 
 utils.seed_torch(2742)
+
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 def main(args):
@@ -63,7 +65,7 @@ def main(args):
     print("dummy?", args.dummy, len(train_data), len(val_data))
 
     dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers,
-                                             worker_init_fn=utils.worker_init_fn,
+                                             worker_init_fn=utils.worker_init_fn, sampler=RandomSampler(data_source=train_data),
                                              collate_fn=utils.my_collate)
 
     ##### TRAINING ####
@@ -156,13 +158,14 @@ def main(args):
             state["best_loss"] = val_loss
             state["best_checkpoint"] = checkpoint_path
 
-        state["epochs"] += 1
-
         # CHECKPOINT
         print("Saving model...")
         utils.save_model(model, optimizer, state, checkpoint_path)
 
+        state["epochs"] += 1
+
     writer.close()
+
 
 if __name__ == '__main__':
     ## TRAIN PARAMETERS

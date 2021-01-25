@@ -6,6 +6,7 @@ import utils
 import numpy as np
 import torch, os
 import torch.nn as nn
+from torch.utils.data.sampler import SequentialSampler
 from model_speech import train_audio_transforms
 
 import time
@@ -180,6 +181,7 @@ def validate(args, model, target_frame, criterion, val_data, device):
                                              batch_size=args.batch_size,
                                              shuffle=False,
                                              num_workers=args.num_workers,
+                                             sampler=SequentialSampler(data_source=val_data),
                                              collate_fn=utils.my_collate)
 
     # VALIDATE

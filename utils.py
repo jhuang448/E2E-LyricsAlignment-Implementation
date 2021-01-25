@@ -77,7 +77,7 @@ def compute_loss(model, inputs, targets, criterion, compute_grad=False):
 
     return avg_loss
 
-def worker_init_fn(worker_id): # This is apparently needed to ensure workers have different random seeds and draw different examples!
+def worker_init_fn(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
 
 def load_example(example, sr=22050, mono=True, mode="numpy", offset=0.0, duration=None):
