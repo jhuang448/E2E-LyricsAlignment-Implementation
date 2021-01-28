@@ -261,7 +261,7 @@ class LyricsAlignDataset(Dataset):
             except StopIteration:
                 last_word_to_include = -np.Inf
 
-            targets = " "
+            targets = ""
             if first_word_to_include - 1 == last_word_to_include + 1: # the word covers the whole window
                 # invalid sample, skip
                 targets = None
@@ -295,7 +295,7 @@ class LyricsAlignDataset(Dataset):
                     continue # remove unknown characters
             seq.append(idx)
         if len(seq) == 0:
-            seq.append(27)
+            seq.append(28) # insert epsilon for instrumental segments
         return np.array(seq)
 
 
