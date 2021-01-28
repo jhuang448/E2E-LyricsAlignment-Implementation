@@ -256,7 +256,7 @@ class LyricsAlignDataset(Dataset):
                 first_word_to_include = np.Inf
 
             try:
-                last_word_to_include = annot_num - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
+                last_word_to_include = annot_num - 1 - next(x for x, val in enumerate(reversed(list(words_start_end_pos[:, 1])))
                                              if val < end_target_pos/self.sr)
             except StopIteration:
                 last_word_to_include = -np.Inf
