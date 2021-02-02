@@ -63,6 +63,10 @@ def compute_loss(model, inputs, targets, criterion, compute_grad=False):
     input_lengths = [input_length] * batch_num
     label_lengths = [len(target) for target in targets]
 
+    for i in np.arange(batch_num):
+        if label_lengths[i] == 0:
+            targets[i] = targets[i].long()
+
     try:
         loss = criterion(all_outputs, torch.cat(targets), input_lengths, label_lengths)
     except:

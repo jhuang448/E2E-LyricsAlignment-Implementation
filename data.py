@@ -289,7 +289,7 @@ class LyricsAlignDataset(Dataset):
             except StopIteration:
                 last_word_to_include = -np.Inf
 
-            targets = " "
+            targets = ""
             if first_word_to_include - 1 == last_word_to_include + 1: # the word covers the whole window
                 # invalid sample, skip
                 targets = None
@@ -318,12 +318,12 @@ class LyricsAlignDataset(Dataset):
                 index = np.random.randint(self.length)
                 continue
 
-            seq = self.text2seq(targets, insert_space=sepa_flag)
+            seq = self.text2seq(targets)
             break
 
         return audio, targets, seq
 
-    def text2seq(self, text, insert_space=False):
+    def text2seq(self, text):
         seq = []
         for c in text.lower():
             idx = string.ascii_lowercase.find(c)
@@ -335,16 +335,8 @@ class LyricsAlignDataset(Dataset):
                 else:
                     continue # remove unknown characters
             seq.append(idx)
-        if len(seq) == 0:
-            seq.append(27)
-
-        # add spaces at the beginning and the end
-        if insert_space:
-            if seq[0] != 27:
-                seq.insert(0, 27)
-            if seq[-1] != 27:
-                seq.append(27)
-
+        # if len(seq) == 0:
+        #     seq.append(28) # insert epsilon for instrumental segments
         return np.array(seq)
 
 

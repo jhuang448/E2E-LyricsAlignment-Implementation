@@ -166,7 +166,6 @@ def main(args):
 
     writer.close()
 
-
 if __name__ == '__main__':
     ## TRAIN PARAMETERS
     parser = argparse.ArgumentParser()
@@ -179,7 +178,7 @@ if __name__ == '__main__':
     parser.add_argument('--features', type=int, default=24,
                         help='Number of feature channels per layer')
     parser.add_argument('--log_dir', type=str, required=True,
-                        help='Folder prefix to write logs into, e.g. logs/waveunet')
+                        help='Folder to write logs into')
     parser.add_argument('--dataset_dir', type=str, default="/import/c4dm-datasets/DALI_v2.0/",
                         help='Dataset path')
     parser.add_argument('--sepa', action='store_true',
