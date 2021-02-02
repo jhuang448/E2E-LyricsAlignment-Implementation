@@ -294,8 +294,8 @@ class LyricsAlignDataset(Dataset):
                 else:
                     continue # remove unknown characters
             seq.append(idx)
-        if len(seq) == 0:
-            seq.append(28) # insert epsilon for instrumental segments
+        # if len(seq) == 0:
+        #     seq.append(28) # insert epsilon for instrumental segments
         return np.array(seq)
 
 
