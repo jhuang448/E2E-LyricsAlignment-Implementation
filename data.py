@@ -238,6 +238,7 @@ class LyricsAlignDataset(Dataset):
             # Loop until it finds a valid sample
 
             sepa_flag = (self.aug == False and self.sepa) or (index >= self.length_base)
+            index = index % self.length_base
 
             # Find out which slice of targets we want to read
             song_idx = self.start_pos.bisect_right(index)

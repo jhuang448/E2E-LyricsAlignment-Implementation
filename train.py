@@ -107,12 +107,7 @@ def main(args):
 
                 t = time.time()
 
-                # Set LR for this iteration
-                # utils.set_cyclic_lr(optimizer, example_num, len(train_data) // args.batch_size, args.cycles, args.min_lr, args.lr)
-                # utils.update_lr(optimizer, state["epochs"], 1, args.lr)
-
                 writer.add_scalar("lr", utils.get_lr(optimizer), state["step"])
-                # print(utils.get_lr(optimizer))
 
                 # Compute loss for each instrument/model
                 optimizer.zero_grad()
@@ -129,7 +124,6 @@ def main(args):
 
                 writer.add_scalar("train/step_loss", avg_loss, state["step"])
 
-                # print(avg_loss)
                 train_loss += avg_loss
 
                 pbar.set_description("Current loss: {:.4f}".format(avg_loss))

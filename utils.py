@@ -160,26 +160,26 @@ def generate_envelope(audio_len, times_list, mute):
 
     env = np.ones(shape=(audio_len,), dtype=np.float)
 
-    last_unmute_end = 0
     i = 0
     while i < len(mute):
         mute_i = mute[i]
-        if mute_i == False:
+        if mute_i == True:
             # first unmuted word after silence
-            unmuted_start = np.int(times_list[i, 0])
-            env[last_unmute_end:unmuted_start] = 0
+            muted_start = np.int(times_list[i, 0])
+            muted_end = np.int(times_list[i, 1])
 
             # skip unmuted segs
-            while i < len(mute) and mute[i] == False:
-                last_unmute_end = np.int(times_list[i, 1])
+            while i < len(mute) and mute[i] == True:
+                muted_end = np.int(times_list[i, 1])
                 i += 1
                 continue
+
+            env[muted_start:muted_end] = 0
         else:
             # skip muted segs
-            while i < len(mute) and mute[i] == True:
+            while i < len(mute) and mute[i] == False:
                 i += 1
                 continue
-    env[last_unmute_end:] = 0
 
     return env
 
