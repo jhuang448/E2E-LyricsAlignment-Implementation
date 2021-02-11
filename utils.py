@@ -120,7 +120,7 @@ def load_lyrics(lyrics_file):
     d["~"] = 28
 
     # process raw
-    with open(lyrics_file + '.words.txt', 'r') as f:
+    with open(lyrics_file + '.raw.txt', 'r') as f:
         raw_lines = f.read().splitlines()
     # concat
     full_lyrics = " ".join(raw_lines)
@@ -131,9 +131,8 @@ def load_lyrics(lyrics_file):
     # full_lyrics = " " + full_lyrics + " "
 
     # split to words
-    # with open(lyrics_file + '.words.txt', 'r') as f:
-    #     words_lines = f.read().splitlines()
-    words_lines = full_lyrics.split()
+    with open(lyrics_file + '.words.txt', 'r') as f:
+        words_lines = f.read().splitlines()
     idx = []
     last_end = 0
     for i in range(len(words_lines)):
@@ -144,8 +143,6 @@ def load_lyrics(lyrics_file):
             print(word)
         new_word = "".join([c for c in word.lower() if c in d.keys()])
         offset = full_lyrics[last_end:].find(new_word)
-        if offset < 0:
-            print(full_lyrics)
         assert (offset >= 0)
         assert(new_word == full_lyrics[last_end+offset:last_end+offset+len(new_word)])
         idx.append([last_end+offset, last_end+offset+len(new_word)])
