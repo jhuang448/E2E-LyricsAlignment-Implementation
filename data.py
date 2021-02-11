@@ -345,9 +345,10 @@ class LyricsAlignDataset(Dataset):
         return self.length
 
 class JamendoLyricsDataset(Dataset):
-    def __init__(self, sr, shapes, hdf_dir, dataset, jamendo_dir, in_memory=False):
+    def __init__(self, sr, shapes, hdf_dir, dataset, jamendo_dir, in_memory=False, sepa=False, sepa_dir='/import/c4dm-datasets/sepa_DALI/audio_eval/'):
         super(JamendoLyricsDataset, self).__init__()
         self.hdf_dataset = None
+        hdf_dir = os.path.join(hdf_dir, "sepa={}".format(sepa))
         os.makedirs(hdf_dir, exist_ok=True)
         self.hdf_file = os.path.join(hdf_dir, dataset + ".hdf5")
 
@@ -376,7 +377,15 @@ class JamendoLyricsDataset(Dataset):
                 for idx, audio_name in enumerate(tqdm(self.audio_list)):
 
                     # Load song
-                    y, _ = load(os.path.join(audio_dir, audio_name), sr=self.sr, mono=True)
+                    if sepa:
+                        # load vocals and accompaniment
+                        y_v, curr_sr = load(os.path.join(sepa_dir, audio_name[:-4] + '_vocals.mp3'), sr=self.sr, mono=True)
+                        y_a, curr_sr = load(os.path.join(sepa_dir, audio_name[:-4] + '_accompaniment.mp3'), sr=self.sr, mono=True)
+
+                        assert (y_a.shape[1] == y_v.shape[1])
+                        y = np.concatenate((y_v, y_a), axis=0)
+                    else:
+                        y, _ = load(os.path.join(audio_dir, audio_name), sr=self.sr, mono=True)
 
                     lyrics, words, idx_in_full = load_lyrics(os.path.join(lyrics_dir, audio_name[:-4]))
                     annot_num = len(words)
