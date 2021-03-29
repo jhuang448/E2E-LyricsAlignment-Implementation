@@ -1,4 +1,3 @@
-import museval
 from tqdm import tqdm
 
 import utils

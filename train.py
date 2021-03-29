@@ -49,11 +49,11 @@ def main(args):
 
     import datetime
     current = datetime.datetime.now()
-    writer = SummaryWriter(args.log_dir + current.strftime("%m:%d:%H:%M"))
+    # writer = SummaryWriter(args.log_dir + current.strftime("%m:%d:%H:%M"))
 
     ### DATASET
-    # dali_split = get_dali_folds(args.dataset_dir, level="words")
-    dali_split = {"train": [], "val": []} # h5 files already saved
+    dali_split = get_dali_folds(args.dataset_dir, level="words")
+    # dali_split = {"train": [], "val": []} # h5 files already saved
 
     # If not data augmentation, at least crop targets to fit model output shape
     # crop_func = partial(crop, shapes=model.shapes)

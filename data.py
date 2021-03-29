@@ -9,7 +9,7 @@ import string
 
 from tqdm import tqdm
 import DALI as dali_code
-from utils import load, write_wav, load_lyrics
+from utils import load, write_wav, load_lyrics, ToolFreq2Midi
 
 import soundfile as sf
 
@@ -45,6 +45,12 @@ def getDALI(database_path, level, lang, genre):
 
                 song = {"id": file[:-4], "annot": [], "path": os.path.join(dali_audio_path, file)}
                 samples = entry.annotations['annot'][level]
+
+                notes_raw = entry.annotations['annot']["notes"]
+                notes = [{"pitch": ToolFreq2Midi(note_raw['freq'][0]), "time": note_raw['time']} for note_raw in
+                         notes_raw]
+                song["notes"] = notes
+
                 subset.append(song)
 
                 for sample in samples:
@@ -161,16 +167,30 @@ class LyricsAlignDataset(Dataset):
                     grp = f.create_group(str(idx))
                     grp.create_dataset("inputs", shape=y.shape, dtype=y.dtype, data=y)
 
+                    grp.attrs["audio_name"] = example["id"]
                     grp.attrs["input_length"] = y.shape[1]
 
+                    # word level annotation
                     annot_num = len(example["annot"])
                     lyrics = [sample["text"].encode() for sample in example["annot"]]
                     times = np.array([sample["time"] for sample in example["annot"]])
 
-                    grp.attrs["annot_num"] = annot_num
+                    # note level annotation
+                    notes = np.array(example["notes"])
+                    note_num = len(notes)
+                    pitches = np.array([int(note["pitch"]) for note in notes])
+                    note_times = np.array([np.array([note['time'][0], note['time'][1]]) for note in notes])
 
+                    grp.attrs["annot_num"] = annot_num
+                    grp.attrs["note_num"] = note_num
+
+                    # words and corresponding times
                     grp.create_dataset("lyrics", shape=(annot_num, 1), dtype='S100', data=lyrics)
                     grp.create_dataset("times", shape=(annot_num, 2), dtype=times.dtype, data=times)
+
+                    # notes and corresponding times
+                    grp.create_dataset("pitches", shape=(note_num, 1), dtype=np.short, data=pitches)
+                    grp.create_dataset("note_times", shape=(note_num, 2), dtype=note_times.dtype, data=note_times)
 
         # In that case, check whether sr and channels are complying with the audio in the HDF file, otherwise raise error
         with h5py.File(self.hdf_file, "r", libver='latest', swmr=True) as f:
