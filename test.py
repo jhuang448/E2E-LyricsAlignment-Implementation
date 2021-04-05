@@ -145,9 +145,6 @@ def predict(args, model, test_data, device):
             # print(all_outputs.shape) # batch, length, classes
             _, _, num_classes = all_outputs.shape
 
-            # plt.matshow(np.exp(all_outputs[9]))
-            # plt.savefig('./pics/' + audio_name + '_9.png')
-
             song_pred = all_outputs.data.numpy().reshape(-1, num_classes)
             # print(song_pred.shape) # total_length, num_classes
 

@@ -47,7 +47,7 @@ def getDALI(database_path, level, lang, genre):
                 samples = entry.annotations['annot'][level]
 
                 notes_raw = entry.annotations['annot']["notes"]
-                notes = [{"pitch": ToolFreq2Midi(note_raw['freq'][0]), "time": note_raw['time']} for note_raw in
+                notes = [{"freq": note_raw['freq'][0], "pitch": ToolFreq2Midi(note_raw['freq'][0]), "time": note_raw['time']} for note_raw in
                          notes_raw]
                 song["notes"] = notes
 
@@ -178,7 +178,7 @@ class LyricsAlignDataset(Dataset):
                     # note level annotation
                     notes = np.array(example["notes"])
                     note_num = len(notes)
-                    pitches = np.array([int(note["pitch"]) for note in notes])
+                    pitches = np.array([note["freq"] for note in notes])
                     note_times = np.array([np.array([note['time'][0], note['time'][1]]) for note in notes])
 
                     grp.attrs["annot_num"] = annot_num
@@ -189,7 +189,7 @@ class LyricsAlignDataset(Dataset):
                     grp.create_dataset("times", shape=(annot_num, 2), dtype=times.dtype, data=times)
 
                     # notes and corresponding times
-                    grp.create_dataset("pitches", shape=(note_num, 1), dtype=np.short, data=pitches)
+                    grp.create_dataset("freqs", shape=(note_num, 1), dtype=np.short, data=pitches)
                     grp.create_dataset("note_times", shape=(note_num, 2), dtype=note_times.dtype, data=note_times)
 
         # In that case, check whether sr and channels are complying with the audio in the HDF file, otherwise raise error
