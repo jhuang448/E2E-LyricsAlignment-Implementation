@@ -431,13 +431,13 @@ class JamendoLyricsDataset(Dataset):
             else:
                 pad_back = 0
 
-                # read audio and zero padding
-                audio = self.hdf_dataset[str(index)]["inputs"][:, start_pos:end_pos].astype(np.float32)
-                audio_name = self.hdf_dataset[str(index)].attrs["audio_name"]
-                lyrics = self.hdf_dataset[str(index)]["lyrics"][0, 0].decode()
-                align_idx = self.hdf_dataset[str(index)]["idx"]
-                if pad_front > 0 or pad_back > 0:
-                    audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
+            # read audio and zero padding
+            audio = self.hdf_dataset[str(index)]["inputs"][:, start_pos:end_pos].astype(np.float32)
+            audio_name = self.hdf_dataset[str(index)].attrs["audio_name"]
+            lyrics = self.hdf_dataset[str(index)]["lyrics"][0, 0].decode()
+            align_idx = self.hdf_dataset[str(index)]["idx"]
+            if pad_front > 0 or pad_back > 0:
+                audio = np.pad(audio, [(0, 0), (pad_front, pad_back)], mode="constant", constant_values=0.0)
 
             chunks.append(audio)
 
