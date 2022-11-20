@@ -391,3 +391,37 @@ def ToolFreq2Midi(fInHz, fA4InHz=440):
         midi[k] = convert_freq2midi_scalar(f, fA4InHz)
 
     return (midi)
+
+
+def mean_freq(file, start_time, end_time):
+    """Get mean fequency of an audio from start_time to end_time
+
+    Args:
+        file (str): audio file. Only support 1-channel audio
+        start_time (int): start time to read, in milisecond
+        end_time (int): end time to stop, in milisecond
+
+    Returns:
+        float: mean frequency of audio's part
+    """
+
+    data, sr = ls.load(file)
+    assert len(data.shape) == 1, "only support 1-channel data"
+
+    # Return a slice of the data from start_time to end_time
+    dataToRead = data[int(start_time*sr/1000): int(end_time*sr/1000) + 1]
+
+    N = len(dataToRead)
+
+    # Compute Fourier transform and mean frequency
+    spec = np.abs(np.fft.rfft(dataToRead))
+    freq = np.fft.rfftfreq(N, d=1/sr)
+    spec = np.abs(spec)
+    amp = spec/spec.sum()
+    mean = (freq*amp).sum()
+
+    # Uncomment these to see the frequency spectrum as a plot
+    # plt.plot(freq, spec)
+    # plt.show()
+
+    return mean
